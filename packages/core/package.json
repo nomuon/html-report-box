@@ -1,0 +1,25 @@
+{
+  "name": "@hrb/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./local": "./src/local/index.ts",
+    "./aws": "./src/aws/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudfront": "^3.1084.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1084.0",
+    "@aws-sdk/client-dynamodb": "^3.1084.0",
+    "@aws-sdk/client-s3": "^3.1084.0",
+    "@aws-sdk/lib-dynamodb": "^3.1084.0",
+    "@aws-sdk/s3-presigned-post": "^3.1084.0",
+    "@hrb/shared": "workspace:*",
+    "aws-jwt-verify": "^5.1.0",
+    "parse5": "^7.2.1"
+  }
+}

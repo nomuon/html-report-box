@@ -1,0 +1,210 @@
+/**
+ * Typed API client for base path /api. Uses @hrb/shared contract types.
+ * DOM-free (relies only on global fetch/URLSearchParams) so it can be unit
+ * tested under `bun test` with a mocked fetch.
+ */
+import type {
+  AdminListReportsResponse,
+  AdminListUsersResponse,
+  AdminReportActionResponse,
+  CompleteReportResponse,
+  CreateReportRequestInput,
+  CreateReportResponse,
+  CreateUploadUrlResponse,
+  DeleteReportResponse,
+  ErrorCode,
+  FlagReportResponse,
+  GetConfigResponse,
+  GetReportResponse,
+  ListReportsResponse,
+  MyReportsResponse,
+  ReportKind,
+  ReportStatus,
+  SearchResponse,
+  UpdateReportRequest,
+  UpdateReportResponse,
+} from "@hrb/shared";
+
+/** Flags as returned by GET /admin/reports/:id/flags (shape defined by @hrb/core). */
+export interface ReportFlagView {
+  reason: string;
+  createdAt: string;
+  sourceIp?: string;
+}
+
+export interface AdminListFlagsResponse {
+  flags: ReportFlagView[];
+}
+
+export class ApiError extends Error {
+  readonly code: ErrorCode | "network";
+  readonly status: number;
+
+  constructor(code: ErrorCode | "network", message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export function isApiError(err: unknown): err is ApiError {
+  return err instanceof ApiError;
+}
+
+export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+export interface ApiClientOptions {
+  /** Defaults to "/api" (same-origin). */
+  baseUrl?: string;
+  /** Called per request; returns auth headers (e.g. x-dev-user). */
+  getHeaders?: () => Record<string, string>;
+  /** Injectable for tests. Defaults to the global fetch. */
+  fetchFn?: FetchLike;
+}
+
+type Query = Record<string, string | number | undefined>;
+
+export class ApiClient {
+  private readonly baseUrl: string;
+  private readonly getHeaders: () => Record<string, string>;
+  private readonly fetchFn: FetchLike;
+
+  constructor(opts: ApiClientOptions = {}) {
+    this.baseUrl = (opts.baseUrl ?? "/api").replace(/\/$/, "");
+    this.getHeaders = opts.getHeaders ?? (() => ({}));
+    // Wrap so a bare global fetch keeps its expected receiver.
+    const f = opts.fetchFn ?? fetch;
+    this.fetchFn = (input, init) => f(input, init);
+  }
+
+  private async request<T>(
+    method: string,
+    path: string,
+    opts: { body?: unknown; query?: Query } = {},
+  ): Promise<T> {
+    let url = `${this.baseUrl}${path}`;
+    if (opts.query) {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(opts.query)) {
+        if (v !== undefined) params.set(k, String(v));
+      }
+      const qs = params.toString();
+      if (qs) url += `?${qs}`;
+    }
+    const headers: Record<string, string> = { ...this.getHeaders() };
+    const init: RequestInit = { method, headers };
+    if (opts.body !== undefined) {
+      headers["content-type"] = "application/json";
+      init.body = JSON.stringify(opts.body);
+    }
+    let res: Response;
+    try {
+      res = await this.fetchFn(url, init);
+    } catch {
+      throw new ApiError("network", "ネットワークエラーが発生しました", 0);
+    }
+    if (!res.ok) {
+      let code: ErrorCode | "network" = "internal" as ErrorCode;
+      let message = `HTTP ${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: { code?: string; message?: string } };
+        if (body?.error?.code) code = body.error.code as ErrorCode;
+        if (body?.error?.message) message = body.error.message;
+      } catch {
+        // non-JSON error body; keep fallback
+      }
+      throw new ApiError(code, message, res.status);
+    }
+    return (await res.json()) as T;
+  }
+
+  // ---- public ----
+
+  getConfig(): Promise<GetConfigResponse> {
+    return this.request("GET", "/config");
+  }
+
+  listReports(opts: { limit?: number; cursor?: string } = {}): Promise<ListReportsResponse> {
+    return this.request("GET", "/reports", { query: { limit: opts.limit, cursor: opts.cursor } });
+  }
+
+  search(q: string, limit?: number): Promise<SearchResponse> {
+    return this.request("GET", "/search", { query: { q, limit } });
+  }
+
+  getReport(id: string): Promise<GetReportResponse> {
+    return this.request("GET", `/reports/${encodeURIComponent(id)}`);
+  }
+
+  flagReport(id: string, reason: string): Promise<FlagReportResponse> {
+    return this.request("POST", `/reports/${encodeURIComponent(id)}/flag`, { body: { reason } });
+  }
+
+  // ---- authenticated ----
+
+  myReports(opts: { limit?: number; cursor?: string } = {}): Promise<MyReportsResponse> {
+    return this.request("GET", "/me/reports", { query: { limit: opts.limit, cursor: opts.cursor } });
+  }
+
+  createReport(req: CreateReportRequestInput): Promise<CreateReportResponse> {
+    return this.request("POST", "/reports", { body: req });
+  }
+
+  createUploadUrl(id: string, kind: ReportKind): Promise<CreateUploadUrlResponse> {
+    return this.request("POST", `/reports/${encodeURIComponent(id)}/upload-url`, {
+      body: { kind },
+    });
+  }
+
+  completeReport(id: string, key: string): Promise<CompleteReportResponse> {
+    return this.request("POST", `/reports/${encodeURIComponent(id)}/complete`, { body: { key } });
+  }
+
+  updateReport(id: string, patch: UpdateReportRequest): Promise<UpdateReportResponse> {
+    return this.request("PATCH", `/reports/${encodeURIComponent(id)}`, { body: patch });
+  }
+
+  deleteReport(id: string): Promise<DeleteReportResponse> {
+    return this.request("DELETE", `/reports/${encodeURIComponent(id)}`);
+  }
+
+  // ---- admin ----
+
+  adminListReports(
+    opts: { status?: ReportStatus; limit?: number; cursor?: string } = {},
+  ): Promise<AdminListReportsResponse> {
+    return this.request("GET", "/admin/reports", {
+      query: { status: opts.status, limit: opts.limit, cursor: opts.cursor },
+    });
+  }
+
+  adminListFlags(id: string): Promise<AdminListFlagsResponse> {
+    return this.request("GET", `/admin/reports/${encodeURIComponent(id)}/flags`);
+  }
+
+  adminApprove(id: string): Promise<AdminReportActionResponse> {
+    return this.request("POST", `/admin/reports/${encodeURIComponent(id)}/approve`);
+  }
+
+  adminReject(id: string): Promise<AdminReportActionResponse> {
+    return this.request("POST", `/admin/reports/${encodeURIComponent(id)}/reject`);
+  }
+
+  adminTakedown(id: string): Promise<AdminReportActionResponse> {
+    return this.request("POST", `/admin/reports/${encodeURIComponent(id)}/takedown`);
+  }
+
+  adminListUsers(opts: { limit?: number; cursor?: string } = {}): Promise<AdminListUsersResponse> {
+    return this.request("GET", "/admin/users", {
+      query: { limit: opts.limit, cursor: opts.cursor },
+    });
+  }
+
+  adminSetAdmin(username: string, isAdmin: boolean): Promise<{ ok: true }> {
+    return this.request(
+      isAdmin ? "PUT" : "DELETE",
+      `/admin/users/${encodeURIComponent(username)}/admin`,
+    );
+  }
+}

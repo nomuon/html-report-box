@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Export Report</title></head>
+<body>
+  <h1>Export Report</h1>
+  <button id="export">Export CSV</button>
+  <script>
+    document.getElementById("export").addEventListener("click", function () {
+      var blob = new Blob(["a,b,c\n1,2,3\n"], { type: "text/csv" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "export.csv";
+      a.click();
+    });
+  </script>
+</body>
+</html>

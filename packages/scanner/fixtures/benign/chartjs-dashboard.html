@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Revenue Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
+</head>
+<body>
+  <h1>Revenue Dashboard</h1>
+  <canvas id="revenue" width="600" height="300"></canvas>
+  <script>
+    const ctx = document.getElementById("revenue");
+    new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+        datasets: [{ label: "Revenue ($k)", data: [120, 150, 180, 170, 220, 260], borderColor: "#4a90d9", tension: 0.3 }]
+      },
+      options: { responsive: true, plugins: { legend: { position: "bottom" } } }
+    });
+  </script>
+</body>
+</html>

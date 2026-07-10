@@ -1,0 +1,21 @@
+{
+  "name": "@hrb/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./lambda": "./src/lambda.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/mcp": "^0.3.1",
+    "@hrb/core": "workspace:*",
+    "@hrb/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "hono": "^4.12.29",
+    "zod": "^4.4.3"
+  }
+}

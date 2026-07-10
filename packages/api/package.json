@@ -1,0 +1,23 @@
+{
+  "name": "@hrb/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./lambda": "./src/lambda.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hrb/core": "workspace:*",
+    "@hrb/mcp": "workspace:*",
+    "@hrb/scanner": "workspace:*",
+    "@hrb/shared": "workspace:*",
+    "aws-jwt-verify": "^5.2.1",
+    "hono": "^4.12.29",
+    "nanoid": "^5.1.16",
+    "zod": "^4.4.3"
+  }
+}

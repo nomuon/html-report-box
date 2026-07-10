@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>2025 Product Analytics Report</title>
+  <style>
+    :root { --bg: #0b0d10; --card: #151a21; --ink: #e6edf3; --accent: #4a90d9; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 40px 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    .card { background: var(--card); border-radius: 12px; padding: 20px; }
+    .kpi { font-size: 2rem; font-weight: 700; color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #232a33; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>2025 Product Analytics Report</h1>
+    <p>Generated summary of key product metrics for the fiscal year.</p>
+    <section class="grid">
+      <div class="card"><div class="kpi">1.2M</div><div>Monthly active users</div></div>
+      <div class="card"><div class="kpi">38%</div><div>Retention (D30)</div></div>
+      <div class="card"><div class="kpi">4.6</div><div>Avg. rating</div></div>
+      <div class="card"><div class="kpi">$8.4M</div><div>ARR</div></div>
+    </section>
+    <h2>Top features by adoption</h2>
+    <table>
+      <thead><tr><th>Feature</th><th>Adoption</th><th>Trend</th></tr></thead>
+      <tbody>
+        <tr><td>Dashboards</td><td>72%</td><td>+6%</td></tr>
+        <tr><td>Exports</td><td>54%</td><td>+2%</td></tr>
+        <tr><td>Alerts</td><td>41%</td><td>+11%</td></tr>
+      </tbody>
+    </table>
+    <script>
+      // Progressive enhancement: highlight the row with the largest trend.
+      const rows = Array.from(document.querySelectorAll("tbody tr"));
+      let best = null;
+      let bestVal = -Infinity;
+      for (const row of rows) {
+        const cell = row.cells[2];
+        const val = parseFloat(cell.textContent.replace("%", ""));
+        if (val > bestVal) { bestVal = val; best = row; }
+      }
+      if (best) best.style.fontWeight = "700";
+    </script>
+  </div>
+</body>
+</html>

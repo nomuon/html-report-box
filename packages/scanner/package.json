@@ -1,0 +1,22 @@
+{
+  "name": "@hrb/scanner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hrb/core": "workspace:*",
+    "@hrb/shared": "workspace:*",
+    "parse5": "^8.0.1",
+    "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/yauzl": "^3.4.0",
+    "fflate": "^0.8.2"
+  }
+}

@@ -1,0 +1,177 @@
+/*
+ * HTML Report Box — design tokens (DESIGN.md §1).
+ * Light is the default; dark is applied both via prefers-color-scheme
+ * (when no manual override) and via [data-theme="dark"] (manual toggle wins).
+ */
+:root {
+  /* ---- カラー: ライト ---- */
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef0f3;
+  --color-border: #d9dde3;
+  --color-border-strong: #b9c0c9;
+  --color-text: #1a2027;
+  --color-text-muted: #5b6675;
+  --color-text-faint: #8a93a0;
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-subtle: #e8effd;
+  --color-danger: #dc2626;
+  --color-danger-hover: #b91c1c;
+  --color-danger-subtle: #fdecec;
+  --color-success: #16a34a;
+  --color-success-subtle: #e7f6ec;
+  --color-warning: #b45309;
+  --color-warning-subtle: #fdf3e2;
+
+  /* ---- status 色（チップ・DropZone 状態で共用） ---- */
+  --status-processing-fg: #4f46e5;
+  --status-processing-bg: #eceafd;
+  --status-published-fg: #15803d;
+  --status-published-bg: #e7f6ec;
+  --status-pending-fg: #b45309;
+  --status-pending-bg: #fdf3e2;
+  --status-rejected-fg: #b91c1c;
+  --status-rejected-bg: #fdecec;
+
+  /* ---- 検索ハイライト ---- */
+  --color-highlight-bg: #fde68a;
+  --color-highlight-fg: #1a2027;
+
+  /* ---- spacing（4px グリッド） ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ---- radius ---- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+
+  /* ---- shadow ---- */
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.1);
+  --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.18);
+
+  /* ---- typography ---- */
+  --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "BIZ UDPGothic",
+    Meiryo, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --leading: 1.6;
+
+  /* ---- その他 ---- */
+  --header-h: 56px;
+  --container-max: 1120px;
+  --transition: 150ms ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #101418;
+    --color-surface: #1a2027;
+    --color-surface-2: #232b34;
+    --color-border: #323c47;
+    --color-border-strong: #46525f;
+    --color-text: #e7ebf0;
+    --color-text-muted: #9aa6b3;
+    --color-text-faint: #6b7683;
+    --color-primary: #4d8dff;
+    --color-primary-hover: #6ba1ff;
+    --color-primary-subtle: #1b2a45;
+    --color-danger: #f26d6d;
+    --color-danger-hover: #ff8a8a;
+    --color-danger-subtle: #3a2226;
+    --color-success: #4ade80;
+    --color-success-subtle: #16301f;
+    --color-warning: #fbbf24;
+    --color-warning-subtle: #362a15;
+
+    --status-processing-fg: #a5b4fc;
+    --status-processing-bg: #272345;
+    --status-published-fg: #6ee7a0;
+    --status-published-bg: #16301f;
+    --status-pending-fg: #fcd34d;
+    --status-pending-bg: #362a15;
+    --status-rejected-fg: #fca5a5;
+    --status-rejected-bg: #3a2226;
+
+    --color-highlight-bg: #705d15;
+    --color-highlight-fg: #f5f0dc;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #101418;
+  --color-surface: #1a2027;
+  --color-surface-2: #232b34;
+  --color-border: #323c47;
+  --color-border-strong: #46525f;
+  --color-text: #e7ebf0;
+  --color-text-muted: #9aa6b3;
+  --color-text-faint: #6b7683;
+  --color-primary: #4d8dff;
+  --color-primary-hover: #6ba1ff;
+  --color-primary-subtle: #1b2a45;
+  --color-danger: #f26d6d;
+  --color-danger-hover: #ff8a8a;
+  --color-danger-subtle: #3a2226;
+  --color-success: #4ade80;
+  --color-success-subtle: #16301f;
+  --color-warning: #fbbf24;
+  --color-warning-subtle: #362a15;
+
+  --status-processing-fg: #a5b4fc;
+  --status-processing-bg: #272345;
+  --status-published-fg: #6ee7a0;
+  --status-published-bg: #16301f;
+  --status-pending-fg: #fcd34d;
+  --status-pending-bg: #362a15;
+  --status-rejected-fg: #fca5a5;
+  --status-rejected-bg: #3a2226;
+
+  --color-highlight-bg: #705d15;
+  --color-highlight-fg: #f5f0dc;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+
+/* ---- 基本ルール ---- */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: var(--leading);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+}

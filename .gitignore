@@ -1,10 +1,16 @@
 # dependencies (bun install)
 node_modules
 
+# local dev state (adapters in @hrb/core/local)
+.local-data
+
 # output
 out
 dist
 *.tgz
+
+# CDK synth output (@hrb/infra)
+cdk.out
 
 # code coverage
 coverage

@@ -1,0 +1,5 @@
+{
+  "app": "bun bin/hrb.ts",
+  "output": "cdk.out",
+  "context": {}
+}

@@ -1,0 +1,2636 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`template snapshots HrbEdgeStack 1`] = `
+{
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "AllowedIpSet": {
+      "Properties": {
+        "Addresses": [
+          "10.0.0.0/8",
+          "192.0.2.0/24",
+        ],
+        "Description": "Internal network CIDRs allowed to reach HTML Report Box",
+        "IPAddressVersion": "IPV4",
+        "Name": "hrb-allowed-cidrs",
+        "Scope": "CLOUDFRONT",
+      },
+      "Type": "AWS::WAFv2::IPSet",
+    },
+    "AppWebAcl": {
+      "Properties": {
+        "DefaultAction": {
+          "Block": {},
+        },
+        "Name": "hrb-app-waf",
+        "Rules": [
+          {
+            "Action": {
+              "Block": {},
+            },
+            "Name": "rate-limit",
+            "Priority": 0,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "IP",
+                "Limit": 1234,
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "hrb-app-waf-rate-limit",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Allow": {},
+            },
+            "Name": "allow-internal-cidrs",
+            "Priority": 1,
+            "Statement": {
+              "IPSetReferenceStatement": {
+                "Arn": {
+                  "Fn::GetAtt": [
+                    "AllowedIpSet",
+                    "Arn",
+                  ],
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "hrb-app-waf-allow-internal",
+              "SampledRequestsEnabled": true,
+            },
+          },
+        ],
+        "Scope": "CLOUDFRONT",
+        "VisibilityConfig": {
+          "CloudWatchMetricsEnabled": true,
+          "MetricName": "hrb-app-waf",
+          "SampledRequestsEnabled": true,
+        },
+      },
+      "Type": "AWS::WAFv2::WebACL",
+    },
+    "ContentWebAcl": {
+      "Properties": {
+        "DefaultAction": {
+          "Block": {},
+        },
+        "Name": "hrb-content-waf",
+        "Rules": [
+          {
+            "Action": {
+              "Block": {},
+            },
+            "Name": "rate-limit",
+            "Priority": 0,
+            "Statement": {
+              "RateBasedStatement": {
+                "AggregateKeyType": "IP",
+                "Limit": 1234,
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "hrb-content-waf-rate-limit",
+              "SampledRequestsEnabled": true,
+            },
+          },
+          {
+            "Action": {
+              "Allow": {},
+            },
+            "Name": "allow-internal-cidrs",
+            "Priority": 1,
+            "Statement": {
+              "IPSetReferenceStatement": {
+                "Arn": {
+                  "Fn::GetAtt": [
+                    "AllowedIpSet",
+                    "Arn",
+                  ],
+                },
+              },
+            },
+            "VisibilityConfig": {
+              "CloudWatchMetricsEnabled": true,
+              "MetricName": "hrb-content-waf-allow-internal",
+              "SampledRequestsEnabled": true,
+            },
+          },
+        ],
+        "Scope": "CLOUDFRONT",
+        "VisibilityConfig": {
+          "CloudWatchMetricsEnabled": true,
+          "MetricName": "hrb-content-waf",
+          "SampledRequestsEnabled": true,
+        },
+      },
+      "Type": "AWS::WAFv2::WebACL",
+    },
+    "CustomCrossRegionExportWriterCustomResourceProviderHandlerD8786E8A": {
+      "DependsOn": [
+        "CustomCrossRegionExportWriterCustomResourceProviderRoleC951B1E1",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-111111111111-us-east-1",
+          "S3Key": "08b23c75a1fe108c9fbd7896f6d7a668289c804be7852d611aecf2a0b501279f.zip",
+        },
+        "Handler": "__entrypoint__.handler",
+        "MemorySize": 128,
+        "Role": {
+          "Fn::GetAtt": [
+            "CustomCrossRegionExportWriterCustomResourceProviderRoleC951B1E1",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs24.x",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "CustomCrossRegionExportWriterCustomResourceProviderRoleC951B1E1": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:\${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+          },
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "ssm:DeleteParameters",
+                    "ssm:ListTagsForResource",
+                    "ssm:GetParameters",
+                    "ssm:PutParameter",
+                  ],
+                  "Effect": "Allow",
+                  "Resource": [
+                    {
+                      "Fn::Join": [
+                        "",
+                        [
+                          "arn:",
+                          {
+                            "Ref": "AWS::Partition",
+                          },
+                          ":ssm:ap-northeast-1:111111111111:parameter/cdk/exports/*",
+                        ],
+                      ],
+                    },
+                  ],
+                },
+              ],
+              "Version": "2012-10-17",
+            },
+            "PolicyName": "Inline",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "ExportsWriterapnortheast12334E1B81D43DF3F": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "CustomCrossRegionExportWriterCustomResourceProviderHandlerD8786E8A",
+            "Arn",
+          ],
+        },
+        "WriterProps": {
+          "exports": {
+            "/cdk/exports/HrbCdnStack/HrbEdgeStackuseast1FnGetAttAppWebAclArn9BEC1669": {
+              "Fn::GetAtt": [
+                "AppWebAcl",
+                "Arn",
+              ],
+            },
+            "/cdk/exports/HrbCdnStack/HrbEdgeStackuseast1FnGetAttContentWebAclArn99FC4DF4": {
+              "Fn::GetAtt": [
+                "ContentWebAcl",
+                "Arn",
+              ],
+            },
+          },
+          "region": "ap-northeast-1",
+        },
+      },
+      "Type": "Custom::CrossRegionExportWriter",
+      "UpdateReplacePolicy": "Delete",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`template snapshots HrbStatefulStack 1`] = `
+{
+  "Outputs": {
+    "ExportsOutputFnGetAttContentBucket52D4B12CArn13DAF1CD": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputFnGetAttContentBucket52D4B12CArn13DAF1CD",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "ContentBucket52D4B12C",
+          "Arn",
+        ],
+      },
+    },
+    "ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "ReportsTable282F2283",
+          "Arn",
+        ],
+      },
+    },
+    "ExportsOutputFnGetAttSearchTableE01A99CFArnC490174F": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputFnGetAttSearchTableE01A99CFArnC490174F",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "SearchTableE01A99CF",
+          "Arn",
+        ],
+      },
+    },
+    "ExportsOutputFnGetAttStagingBucket9644C37CArnD8583786": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputFnGetAttStagingBucket9644C37CArnD8583786",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "StagingBucket9644C37C",
+          "Arn",
+        ],
+      },
+    },
+    "ExportsOutputFnGetAttUserPool6BA7E5F2Arn686ACC00": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputFnGetAttUserPool6BA7E5F2Arn686ACC00",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "UserPool6BA7E5F2",
+          "Arn",
+        ],
+      },
+    },
+    "ExportsOutputRefAppBucket20FEBF1C536408AA": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputRefAppBucket20FEBF1C536408AA",
+      },
+      "Value": {
+        "Ref": "AppBucket20FEBF1C",
+      },
+    },
+    "ExportsOutputRefContentBucket52D4B12CF28429AF": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputRefContentBucket52D4B12CF28429AF",
+      },
+      "Value": {
+        "Ref": "ContentBucket52D4B12C",
+      },
+    },
+    "ExportsOutputRefReportsTable282F228301302D83": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputRefReportsTable282F228301302D83",
+      },
+      "Value": {
+        "Ref": "ReportsTable282F2283",
+      },
+    },
+    "ExportsOutputRefSearchTableE01A99CFF2E234A1": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputRefSearchTableE01A99CFF2E234A1",
+      },
+      "Value": {
+        "Ref": "SearchTableE01A99CF",
+      },
+    },
+    "ExportsOutputRefStagingBucket9644C37C80747B50": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputRefStagingBucket9644C37C80747B50",
+      },
+      "Value": {
+        "Ref": "StagingBucket9644C37C",
+      },
+    },
+    "ExportsOutputRefUserPool6BA7E5F296FD7236": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputRefUserPool6BA7E5F296FD7236",
+      },
+      "Value": {
+        "Ref": "UserPool6BA7E5F2",
+      },
+    },
+    "ExportsOutputRefUserPoolSpaClient6B560FFA03368753": {
+      "Export": {
+        "Name": "HrbStatefulStack:ExportsOutputRefUserPoolSpaClient6B560FFA03368753",
+      },
+      "Value": {
+        "Ref": "UserPoolSpaClient6B560FFA",
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "AdminGroup": {
+      "Properties": {
+        "Description": "HTML Report Box administrators (approve/reject/takedown)",
+        "GroupName": "admin",
+        "UserPoolId": {
+          "Ref": "UserPool6BA7E5F2",
+        },
+      },
+      "Type": "AWS::Cognito::UserPoolGroup",
+    },
+    "AppBucket20FEBF1C": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "AppBucketPolicy552652DA": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "AppBucket20FEBF1C",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "AppBucket20FEBF1C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "AppBucket20FEBF1C",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:GetObject",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": "111111111111",
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudfront.amazonaws.com",
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "AppBucket20FEBF1C",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+              "Sid": "AllowCloudFrontOacRead",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
+    "ContentBucket52D4B12C": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled",
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "ContentBucketPolicyA748B2E4": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "ContentBucket52D4B12C",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "ContentBucket52D4B12C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "ContentBucket52D4B12C",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "s3:GetObject",
+              "Condition": {
+                "StringEquals": {
+                  "aws:SourceAccount": "111111111111",
+                },
+              },
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "cloudfront.amazonaws.com",
+              },
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::GetAtt": [
+                        "ContentBucket52D4B12C",
+                        "Arn",
+                      ],
+                    },
+                    "/*",
+                  ],
+                ],
+              },
+              "Sid": "AllowCloudFrontOacRead",
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
+    "GoogleIdp206FECA7": {
+      "Properties": {
+        "AttributeMapping": {
+          "email": "email",
+          "name": "name",
+        },
+        "ProviderDetails": {
+          "authorize_scopes": "openid email profile",
+          "client_id": "test-google-client-id.apps.googleusercontent.com",
+          "client_secret": "{{resolve:ssm-secure:/hrb/google-client-secret}}",
+        },
+        "ProviderName": "Google",
+        "ProviderType": "Google",
+        "UserPoolId": {
+          "Ref": "UserPool6BA7E5F2",
+        },
+      },
+      "Type": "AWS::Cognito::UserPoolIdentityProvider",
+    },
+    "ReportsTable282F2283": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "sk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "gsi1pk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "gsi1sk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "gsi2pk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "gsi2sk",
+            "AttributeType": "S",
+          },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "GSI1",
+            "KeySchema": [
+              {
+                "AttributeName": "gsi1pk",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "gsi1sk",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+          {
+            "IndexName": "GSI2",
+            "KeySchema": [
+              {
+                "AttributeName": "gsi2pk",
+                "KeyType": "HASH",
+              },
+              {
+                "AttributeName": "gsi2sk",
+                "KeyType": "RANGE",
+              },
+            ],
+            "Projection": {
+              "ProjectionType": "ALL",
+            },
+          },
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH",
+          },
+          {
+            "AttributeName": "sk",
+            "KeyType": "RANGE",
+          },
+        ],
+        "TableName": "hrb-reports",
+      },
+      "Type": "AWS::DynamoDB::Table",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "SearchTableE01A99CF": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S",
+          },
+          {
+            "AttributeName": "sk",
+            "AttributeType": "S",
+          },
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH",
+          },
+          {
+            "AttributeName": "sk",
+            "KeyType": "RANGE",
+          },
+        ],
+        "TableName": "hrb-search",
+      },
+      "Type": "AWS::DynamoDB::Table",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "StagingBucket9644C37C": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256",
+              },
+            },
+          ],
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "AbortIncompleteMultipartUpload": {
+                "DaysAfterInitiation": 1,
+              },
+              "ExpirationInDays": 1,
+              "Id": "expire-staging-1d",
+              "Prefix": "staging/",
+              "Status": "Enabled",
+            },
+            {
+              "ExpirationInDays": 30,
+              "Id": "expire-quarantine-30d",
+              "Prefix": "quarantine/",
+              "Status": "Enabled",
+            },
+          ],
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true,
+        },
+      },
+      "Type": "AWS::S3::Bucket",
+      "UpdateReplacePolicy": "Delete",
+    },
+    "StagingBucketPolicy83BEDEEE": {
+      "Properties": {
+        "Bucket": {
+          "Ref": "StagingBucket9644C37C",
+        },
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "s3:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false",
+                },
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*",
+              },
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "StagingBucket9644C37C",
+                    "Arn",
+                  ],
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "StagingBucket9644C37C",
+                          "Arn",
+                        ],
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+      },
+      "Type": "AWS::S3::BucketPolicy",
+    },
+    "UserPool6BA7E5F2": {
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "AccountRecoverySetting": {
+          "RecoveryMechanisms": [
+            {
+              "Name": "verified_phone_number",
+              "Priority": 1,
+            },
+            {
+              "Name": "verified_email",
+              "Priority": 2,
+            },
+          ],
+        },
+        "AdminCreateUserConfig": {
+          "AllowAdminCreateUserOnly": true,
+        },
+        "AutoVerifiedAttributes": [
+          "email",
+        ],
+        "EmailVerificationMessage": "The verification code to your new account is {####}",
+        "EmailVerificationSubject": "Verify your new account",
+        "SmsVerificationMessage": "The verification code to your new account is {####}",
+        "UserPoolName": "hrb-users",
+        "UsernameAttributes": [
+          "email",
+        ],
+        "VerificationMessageTemplate": {
+          "DefaultEmailOption": "CONFIRM_WITH_CODE",
+          "EmailMessage": "The verification code to your new account is {####}",
+          "EmailSubject": "Verify your new account",
+          "SmsMessage": "The verification code to your new account is {####}",
+        },
+      },
+      "Type": "AWS::Cognito::UserPool",
+      "UpdateReplacePolicy": "Retain",
+    },
+    "UserPoolHostedDomainE2BAC752": {
+      "Properties": {
+        "Domain": "hrb-test",
+        "UserPoolId": {
+          "Ref": "UserPool6BA7E5F2",
+        },
+      },
+      "Type": "AWS::Cognito::UserPoolDomain",
+    },
+    "UserPoolSpaClient6B560FFA": {
+      "DependsOn": [
+        "GoogleIdp206FECA7",
+      ],
+      "Properties": {
+        "AllowedOAuthFlows": [
+          "code",
+        ],
+        "AllowedOAuthFlowsUserPoolClient": true,
+        "AllowedOAuthScopes": [
+          "openid",
+          "email",
+          "profile",
+        ],
+        "CallbackURLs": [
+          "http://localhost:5173/auth/callback",
+        ],
+        "ClientName": "hrb-spa",
+        "GenerateSecret": false,
+        "LogoutURLs": [
+          "http://localhost:5173/",
+        ],
+        "PreventUserExistenceErrors": "ENABLED",
+        "SupportedIdentityProviders": [
+          "Google",
+        ],
+        "UserPoolId": {
+          "Ref": "UserPool6BA7E5F2",
+        },
+      },
+      "Type": "AWS::Cognito::UserPoolClient",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`template snapshots HrbAppStack 1`] = `
+{
+  "Outputs": {
+    "ExportsOutputFnGetAttHttpApiF5A9A8A7ApiEndpoint082134F8": {
+      "Export": {
+        "Name": "HrbAppStack:ExportsOutputFnGetAttHttpApiF5A9A8A7ApiEndpoint082134F8",
+      },
+      "Value": {
+        "Fn::GetAtt": [
+          "HttpApiF5A9A8A7",
+          "ApiEndpoint",
+        ],
+      },
+    },
+    "HttpApiEndpoint": {
+      "Value": {
+        "Fn::GetAtt": [
+          "HttpApiF5A9A8A7",
+          "ApiEndpoint",
+        ],
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "ApiFunctionCE271BD4": {
+      "DependsOn": [
+        "ApiFunctionServiceRoleDefaultPolicy20A32B8D",
+        "ApiFunctionServiceRole52B9747B",
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64",
+        ],
+        "Code": {
+          "ZipFile": 
+"exports.handler = async () => ({
+  statusCode: 501,
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ error: { code: "not_implemented", message: "placeholder bundle - run scripts/build-lambda.ts" } }),
+});"
+,
+        },
+        "Description": "HTML Report Box HTTP API (Hono)",
+        "Environment": {
+          "Variables": {
+            "APP_MODE": "aws",
+            "CONTENT_BASE_URL": "https://content.invalid",
+            "CONTENT_BASE_URL_PARAM": "/hrb/content-base-url",
+            "CONTENT_BUCKET": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefContentBucket52D4B12CF28429AF",
+            },
+            "CONTENT_DISTRIBUTION_ID_PARAM": "/hrb/content-distribution-id",
+            "DOMAIN_BLOCKLIST_BUCKET": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefStagingBucket9644C37C80747B50",
+            },
+            "DOMAIN_BLOCKLIST_KEY": "feeds/domain-blocklist.json",
+            "ORIGIN_VERIFY_SECRET": "test-origin-verify-secret",
+            "QUARANTINE_PREFIX": "quarantine/",
+            "REPORTS_TABLE_NAME": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefReportsTable282F228301302D83",
+            },
+            "SEARCH_TABLE_NAME": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefSearchTableE01A99CFF2E234A1",
+            },
+            "STAGING_BUCKET": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefStagingBucket9644C37C80747B50",
+            },
+            "STAGING_PREFIX": "staging/",
+            "USER_POOL_CLIENT_ID": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefUserPoolSpaClient6B560FFA03368753",
+            },
+            "USER_POOL_ID": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefUserPool6BA7E5F296FD7236",
+            },
+          },
+        },
+        "FunctionName": "hrb-api",
+        "Handler": "index.handler",
+        "MemorySize": 1024,
+        "Role": {
+          "Fn::GetAtt": [
+            "ApiFunctionServiceRole52B9747B",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 29,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "ApiFunctionServiceRole52B9747B": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "ApiFunctionServiceRoleDefaultPolicy20A32B8D": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:Query",
+                "dynamodb:GetItem",
+                "dynamodb:Scan",
+                "dynamodb:ConditionCheckItem",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:DescribeTable",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "dynamodb:GetRecords",
+                "dynamodb:GetShardIterator",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:Query",
+                "dynamodb:GetItem",
+                "dynamodb:Scan",
+                "dynamodb:ConditionCheckItem",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:DescribeTable",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttSearchTableE01A99CFArnC490174F",
+                },
+              ],
+            },
+            {
+              "Action": [
+                "dynamodb:GetRecords",
+                "dynamodb:GetShardIterator",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttSearchTableE01A99CFArnC490174F",
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttContentBucket52D4B12CArn13DAF1CD",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttContentBucket52D4B12CArn13DAF1CD",
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttStagingBucket9644C37CArnD8583786",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttStagingBucket9644C37CArnD8583786",
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "cognito-idp:ListUsers",
+                "cognito-idp:AdminListGroupsForUser",
+                "cognito-idp:AdminAddUserToGroup",
+                "cognito-idp:AdminRemoveUserFromGroup",
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttUserPool6BA7E5F2Arn686ACC00",
+              },
+            },
+            {
+              "Action": "cloudfront:CreateInvalidation",
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "ssm:GetParameter",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:ap-northeast-1:111111111111:parameter/hrb/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "ApiFunctionServiceRoleDefaultPolicy20A32B8D",
+        "Roles": [
+          {
+            "Ref": "ApiFunctionServiceRole52B9747B",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "DailyDomainFeedRuleAllowEventRuleHrbAppStackDomainFeedFunction9D19601F1CC41E58": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "DomainFeedFunctionB7EC3872",
+            "Arn",
+          ],
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "DailyDomainFeedRuleBDB10501",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "DailyDomainFeedRuleBDB10501": {
+      "Properties": {
+        "Name": "hrb-daily-domain-feed",
+        "ScheduleExpression": "cron(0 3 * * ? *)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "DomainFeedFunctionB7EC3872",
+                "Arn",
+              ],
+            },
+            "Id": "Target0",
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "DomainFeedFunctionB7EC3872": {
+      "DependsOn": [
+        "DomainFeedFunctionServiceRoleDefaultPolicyCECBA477",
+        "DomainFeedFunctionServiceRoleFD008368",
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64",
+        ],
+        "Code": {
+          "ZipFile": "exports.handler = async () => { console.log("stub: fetch URLhaus/OpenPhish -> S3 blocklist (TODO)"); return { ok: true }; };",
+        },
+        "Description": "Daily malicious-domain feed fetch (stub handler)",
+        "Environment": {
+          "Variables": {
+            "DOMAIN_BLOCKLIST_BUCKET": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefStagingBucket9644C37C80747B50",
+            },
+            "DOMAIN_BLOCKLIST_KEY": "feeds/domain-blocklist.json",
+          },
+        },
+        "FunctionName": "hrb-domain-feed",
+        "Handler": "index.handler",
+        "MemorySize": 512,
+        "Role": {
+          "Fn::GetAtt": [
+            "DomainFeedFunctionServiceRoleFD008368",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 300,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "DomainFeedFunctionServiceRoleDefaultPolicyCECBA477": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "s3:DeleteObject*",
+                "s3:PutObject",
+                "s3:PutObjectLegalHold",
+                "s3:PutObjectRetention",
+                "s3:PutObjectTagging",
+                "s3:PutObjectVersionTagging",
+                "s3:Abort*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttStagingBucket9644C37CArnD8583786",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttStagingBucket9644C37CArnD8583786",
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "DomainFeedFunctionServiceRoleDefaultPolicyCECBA477",
+        "Roles": [
+          {
+            "Ref": "DomainFeedFunctionServiceRoleFD008368",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "DomainFeedFunctionServiceRoleFD008368": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "HttpApiANYapiproxy20978A2B": {
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApiF5A9A8A7",
+        },
+        "AuthorizationType": "NONE",
+        "RouteKey": "ANY /api/{proxy+}",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "HttpApiANYapiproxyApiIntegrationE4FFE0AC",
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::ApiGatewayV2::Route",
+    },
+    "HttpApiANYapiproxyApiIntegrationE4FFE0AC": {
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApiF5A9A8A7",
+        },
+        "IntegrationType": "AWS_PROXY",
+        "IntegrationUri": {
+          "Fn::GetAtt": [
+            "ApiFunctionCE271BD4",
+            "Arn",
+          ],
+        },
+        "PayloadFormatVersion": "2.0",
+      },
+      "Type": "AWS::ApiGatewayV2::Integration",
+    },
+    "HttpApiANYapiproxyApiIntegrationPermission37A64BBC": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "ApiFunctionCE271BD4",
+            "Arn",
+          ],
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":execute-api:ap-northeast-1:111111111111:",
+              {
+                "Ref": "HttpApiF5A9A8A7",
+              },
+              "/*/*/api/{proxy+}",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "HttpApiANYmcpEB02869A": {
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApiF5A9A8A7",
+        },
+        "AuthorizationType": "NONE",
+        "RouteKey": "ANY /mcp",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "HttpApiANYmcpMcpIntegration64845559",
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::ApiGatewayV2::Route",
+    },
+    "HttpApiANYmcpMcpIntegration64845559": {
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApiF5A9A8A7",
+        },
+        "IntegrationType": "AWS_PROXY",
+        "IntegrationUri": {
+          "Fn::GetAtt": [
+            "McpFunctionF370A1F8",
+            "Arn",
+          ],
+        },
+        "PayloadFormatVersion": "2.0",
+      },
+      "Type": "AWS::ApiGatewayV2::Integration",
+    },
+    "HttpApiANYmcpMcpIntegrationPermission33F3B3A5": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "McpFunctionF370A1F8",
+            "Arn",
+          ],
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":execute-api:ap-northeast-1:111111111111:",
+              {
+                "Ref": "HttpApiF5A9A8A7",
+              },
+              "/*/*/mcp",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "HttpApiANYmcpproxyD750B93B": {
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApiF5A9A8A7",
+        },
+        "AuthorizationType": "NONE",
+        "RouteKey": "ANY /mcp/{proxy+}",
+        "Target": {
+          "Fn::Join": [
+            "",
+            [
+              "integrations/",
+              {
+                "Ref": "HttpApiANYmcpMcpIntegration64845559",
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::ApiGatewayV2::Route",
+    },
+    "HttpApiANYmcpproxyMcpIntegrationPermission6C268DAD": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "McpFunctionF370A1F8",
+            "Arn",
+          ],
+        },
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":execute-api:ap-northeast-1:111111111111:",
+              {
+                "Ref": "HttpApiF5A9A8A7",
+              },
+              "/*/*/mcp/{proxy+}",
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+    "HttpApiDefaultStage3EEB07D6": {
+      "Properties": {
+        "ApiId": {
+          "Ref": "HttpApiF5A9A8A7",
+        },
+        "AutoDeploy": true,
+        "StageName": "$default",
+      },
+      "Type": "AWS::ApiGatewayV2::Stage",
+    },
+    "HttpApiF5A9A8A7": {
+      "Properties": {
+        "Description": "HTML Report Box API + MCP (fronted by CloudFront Distribution A)",
+        "Name": "hrb-http-api",
+        "ProtocolType": "HTTP",
+      },
+      "Type": "AWS::ApiGatewayV2::Api",
+    },
+    "McpFunctionF370A1F8": {
+      "DependsOn": [
+        "McpFunctionServiceRoleDefaultPolicy29310C43",
+        "McpFunctionServiceRoleF37F17FC",
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64",
+        ],
+        "Code": {
+          "ZipFile": 
+"exports.handler = async () => ({
+  statusCode: 501,
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ error: { code: "not_implemented", message: "placeholder bundle - run scripts/build-lambda.ts" } }),
+});"
+,
+        },
+        "Description": "HTML Report Box remote MCP server (Streamable HTTP, stateless)",
+        "Environment": {
+          "Variables": {
+            "APP_MODE": "aws",
+            "CONTENT_BASE_URL": "https://content.invalid",
+            "CONTENT_BASE_URL_PARAM": "/hrb/content-base-url",
+            "CONTENT_BUCKET": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefContentBucket52D4B12CF28429AF",
+            },
+            "CONTENT_DISTRIBUTION_ID_PARAM": "/hrb/content-distribution-id",
+            "DOMAIN_BLOCKLIST_BUCKET": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefStagingBucket9644C37C80747B50",
+            },
+            "DOMAIN_BLOCKLIST_KEY": "feeds/domain-blocklist.json",
+            "ORIGIN_VERIFY_SECRET": "test-origin-verify-secret",
+            "QUARANTINE_PREFIX": "quarantine/",
+            "REPORTS_TABLE_NAME": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefReportsTable282F228301302D83",
+            },
+            "SEARCH_TABLE_NAME": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefSearchTableE01A99CFF2E234A1",
+            },
+            "STAGING_BUCKET": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefStagingBucket9644C37C80747B50",
+            },
+            "STAGING_PREFIX": "staging/",
+            "USER_POOL_CLIENT_ID": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefUserPoolSpaClient6B560FFA03368753",
+            },
+            "USER_POOL_ID": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefUserPool6BA7E5F296FD7236",
+            },
+          },
+        },
+        "FunctionName": "hrb-mcp",
+        "Handler": "index.handler",
+        "MemorySize": 1024,
+        "Role": {
+          "Fn::GetAtt": [
+            "McpFunctionServiceRoleF37F17FC",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 29,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "McpFunctionServiceRoleDefaultPolicy29310C43": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:Query",
+                "dynamodb:GetItem",
+                "dynamodb:Scan",
+                "dynamodb:ConditionCheckItem",
+                "dynamodb:DescribeTable",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "dynamodb:GetRecords",
+                "dynamodb:GetShardIterator",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:Query",
+                "dynamodb:GetItem",
+                "dynamodb:Scan",
+                "dynamodb:ConditionCheckItem",
+                "dynamodb:DescribeTable",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttSearchTableE01A99CFArnC490174F",
+                },
+              ],
+            },
+            {
+              "Action": [
+                "dynamodb:GetRecords",
+                "dynamodb:GetShardIterator",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttSearchTableE01A99CFArnC490174F",
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttContentBucket52D4B12CArn13DAF1CD",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttContentBucket52D4B12CArn13DAF1CD",
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttStagingBucket9644C37CArnD8583786",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttStagingBucket9644C37CArnD8583786",
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": "ssm:GetParameter",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":ssm:ap-northeast-1:111111111111:parameter/hrb/*",
+                  ],
+                ],
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "McpFunctionServiceRoleDefaultPolicy29310C43",
+        "Roles": [
+          {
+            "Ref": "McpFunctionServiceRoleF37F17FC",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "McpFunctionServiceRoleF37F17FC": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "RescanFunctionCAF5A905": {
+      "DependsOn": [
+        "RescanFunctionServiceRoleDefaultPolicy08D3B6A2",
+        "RescanFunctionServiceRole08E508D8",
+      ],
+      "Properties": {
+        "Architectures": [
+          "arm64",
+        ],
+        "Code": {
+          "ZipFile": "exports.handler = async () => { console.log("stub: weekly full rescan of published reports (TODO)"); return { ok: true }; };",
+        },
+        "Description": "Weekly full rescan of published reports (stub handler)",
+        "Environment": {
+          "Variables": {
+            "APP_MODE": "aws",
+            "CONTENT_BASE_URL": "https://content.invalid",
+            "CONTENT_BASE_URL_PARAM": "/hrb/content-base-url",
+            "CONTENT_BUCKET": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefContentBucket52D4B12CF28429AF",
+            },
+            "CONTENT_DISTRIBUTION_ID_PARAM": "/hrb/content-distribution-id",
+            "DOMAIN_BLOCKLIST_BUCKET": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefStagingBucket9644C37C80747B50",
+            },
+            "DOMAIN_BLOCKLIST_KEY": "feeds/domain-blocklist.json",
+            "ORIGIN_VERIFY_SECRET": "test-origin-verify-secret",
+            "QUARANTINE_PREFIX": "quarantine/",
+            "REPORTS_TABLE_NAME": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefReportsTable282F228301302D83",
+            },
+            "SEARCH_TABLE_NAME": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefSearchTableE01A99CFF2E234A1",
+            },
+            "STAGING_BUCKET": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefStagingBucket9644C37C80747B50",
+            },
+            "STAGING_PREFIX": "staging/",
+            "USER_POOL_CLIENT_ID": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefUserPoolSpaClient6B560FFA03368753",
+            },
+            "USER_POOL_ID": {
+              "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefUserPool6BA7E5F296FD7236",
+            },
+          },
+        },
+        "FunctionName": "hrb-rescan",
+        "Handler": "index.handler",
+        "MemorySize": 1024,
+        "Role": {
+          "Fn::GetAtt": [
+            "RescanFunctionServiceRole08E508D8",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs22.x",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "RescanFunctionServiceRole08E508D8": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition",
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+              ],
+            ],
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "RescanFunctionServiceRoleDefaultPolicy08D3B6A2": {
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:Query",
+                "dynamodb:GetItem",
+                "dynamodb:Scan",
+                "dynamodb:ConditionCheckItem",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:DescribeTable",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "dynamodb:GetRecords",
+                "dynamodb:GetShardIterator",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttReportsTable282F2283Arn95C8A393",
+                      },
+                      "/index/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttContentBucket52D4B12CArn13DAF1CD",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttContentBucket52D4B12CArn13DAF1CD",
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+            {
+              "Action": [
+                "s3:GetObject*",
+                "s3:GetBucket*",
+                "s3:List*",
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttStagingBucket9644C37CArnD8583786",
+                },
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::ImportValue": "HrbStatefulStack:ExportsOutputFnGetAttStagingBucket9644C37CArnD8583786",
+                      },
+                      "/*",
+                    ],
+                  ],
+                },
+              ],
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "PolicyName": "RescanFunctionServiceRoleDefaultPolicy08D3B6A2",
+        "Roles": [
+          {
+            "Ref": "RescanFunctionServiceRole08E508D8",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Policy",
+    },
+    "WeeklyRescanRule8DD72003": {
+      "Properties": {
+        "Name": "hrb-weekly-rescan",
+        "ScheduleExpression": "cron(0 4 ? * SUN *)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "RescanFunctionCAF5A905",
+                "Arn",
+              ],
+            },
+            "Id": "Target0",
+          },
+        ],
+      },
+      "Type": "AWS::Events::Rule",
+    },
+    "WeeklyRescanRuleAllowEventRuleHrbAppStackRescanFunctionA82FA88FF9894764": {
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "RescanFunctionCAF5A905",
+            "Arn",
+          ],
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "WeeklyRescanRule8DD72003",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "AWS::Lambda::Permission",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
+
+exports[`template snapshots HrbCdnStack 1`] = `
+{
+  "Outputs": {
+    "AppDistributionDomain": {
+      "Value": {
+        "Fn::GetAtt": [
+          "AppDistributionFE05A23E",
+          "DomainName",
+        ],
+      },
+    },
+    "ContentDistributionDomain": {
+      "Value": {
+        "Fn::GetAtt": [
+          "ContentDistribution1BFD83AE",
+          "DomainName",
+        ],
+      },
+    },
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]",
+      "Type": "AWS::SSM::Parameter::Value<String>",
+    },
+  },
+  "Resources": {
+    "AppDistributionFE05A23E": {
+      "Properties": {
+        "DistributionConfig": {
+          "CacheBehaviors": [
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+              "PathPattern": "/api/*",
+              "TargetOriginId": "HrbCdnStackAppDistributionOrigin2AD84BEBB",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+              "PathPattern": "/mcp",
+              "TargetOriginId": "HrbCdnStackAppDistributionOrigin2AD84BEBB",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+            {
+              "AllowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT",
+                "PATCH",
+                "POST",
+                "DELETE",
+              ],
+              "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
+              "Compress": true,
+              "OriginRequestPolicyId": "b689b0a8-53d0-40ab-baf2-68738e2966ac",
+              "PathPattern": "/mcp/*",
+              "TargetOriginId": "HrbCdnStackAppDistributionOrigin2AD84BEBB",
+              "ViewerProtocolPolicy": "redirect-to-https",
+            },
+          ],
+          "Comment": "hrb app (SPA + API + MCP)",
+          "DefaultCacheBehavior": {
+            "AllowedMethods": [
+              "GET",
+              "HEAD",
+            ],
+            "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+            "Compress": true,
+            "FunctionAssociations": [
+              {
+                "EventType": "viewer-request",
+                "FunctionARN": {
+                  "Fn::GetAtt": [
+                    "AppRequestFunction92B58E09",
+                    "FunctionARN",
+                  ],
+                },
+              },
+            ],
+            "TargetOriginId": "HrbCdnStackAppDistributionOrigin1B377E2B6",
+            "ViewerProtocolPolicy": "redirect-to-https",
+          },
+          "DefaultRootObject": "index.html",
+          "Enabled": true,
+          "HttpVersion": "http2",
+          "IPV6Enabled": true,
+          "Origins": [
+            {
+              "DomainName": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefAppBucket20FEBF1C536408AA",
+                    },
+                    ".s3.ap-northeast-1.amazonaws.com",
+                  ],
+                ],
+              },
+              "Id": "HrbCdnStackAppDistributionOrigin1B377E2B6",
+              "OriginAccessControlId": {
+                "Fn::GetAtt": [
+                  "AppDistributionOrigin1S3OriginAccessControlAA4CB5E2",
+                  "Id",
+                ],
+              },
+              "S3OriginConfig": {
+                "OriginAccessIdentity": "",
+              },
+            },
+            {
+              "CustomOriginConfig": {
+                "OriginProtocolPolicy": "https-only",
+                "OriginSSLProtocols": [
+                  "TLSv1.2",
+                ],
+              },
+              "DomainName": {
+                "Fn::Select": [
+                  2,
+                  {
+                    "Fn::Split": [
+                      "/",
+                      {
+                        "Fn::ImportValue": "HrbAppStack:ExportsOutputFnGetAttHttpApiF5A9A8A7ApiEndpoint082134F8",
+                      },
+                    ],
+                  },
+                ],
+              },
+              "Id": "HrbCdnStackAppDistributionOrigin2AD84BEBB",
+              "OriginCustomHeaders": [
+                {
+                  "HeaderName": "x-origin-verify",
+                  "HeaderValue": "test-origin-verify-secret",
+                },
+              ],
+            },
+          ],
+          "WebACLId": {
+            "Fn::GetAtt": [
+              "ExportsReader8B249524",
+              "/cdk/exports/HrbCdnStack/HrbEdgeStackuseast1FnGetAttAppWebAclArn9BEC1669",
+            ],
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::Distribution",
+    },
+    "AppDistributionOrigin1S3OriginAccessControlAA4CB5E2": {
+      "Properties": {
+        "OriginAccessControlConfig": {
+          "Name": "HrbCdnStackAppDistributionOrigin1S3OriginAccessControl1CD5D49A",
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4",
+        },
+      },
+      "Type": "AWS::CloudFront::OriginAccessControl",
+    },
+    "AppRequestFunction92B58E09": {
+      "Properties": {
+        "AutoPublish": true,
+        "FunctionCode": 
+"function handler(event) {
+  var request = event.request;
+  if (request.uri.indexOf('.') === -1) {
+    request.uri = '/index.html';
+  }
+  return request;
+}"
+,
+        "FunctionConfig": {
+          "Comment": "SPA history-API fallback (default behavior only)",
+          "Runtime": "cloudfront-js-2.0",
+        },
+        "Name": "hrb-app-request",
+      },
+      "Type": "AWS::CloudFront::Function",
+    },
+    "ContentBaseUrlParam44E48435": {
+      "Properties": {
+        "Name": "/hrb/content-base-url",
+        "Type": "String",
+        "Value": {
+          "Fn::Join": [
+            "",
+            [
+              "https://",
+              {
+                "Fn::GetAtt": [
+                  "ContentDistribution1BFD83AE",
+                  "DomainName",
+                ],
+              },
+            ],
+          ],
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ContentDistribution1BFD83AE": {
+      "Properties": {
+        "DistributionConfig": {
+          "Comment": "hrb content (uploaded reports, cookieless origin)",
+          "DefaultCacheBehavior": {
+            "AllowedMethods": [
+              "GET",
+              "HEAD",
+            ],
+            "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+            "Compress": true,
+            "FunctionAssociations": [
+              {
+                "EventType": "viewer-request",
+                "FunctionARN": {
+                  "Fn::GetAtt": [
+                    "ContentRequestFunction9374C17A",
+                    "FunctionARN",
+                  ],
+                },
+              },
+            ],
+            "ResponseHeadersPolicyId": {
+              "Ref": "ContentHeadersA4A280C7",
+            },
+            "TargetOriginId": "HrbCdnStackContentDistributionOrigin14F90E592",
+            "ViewerProtocolPolicy": "redirect-to-https",
+          },
+          "Enabled": true,
+          "HttpVersion": "http2",
+          "IPV6Enabled": true,
+          "Origins": [
+            {
+              "DomainName": {
+                "Fn::Join": [
+                  "",
+                  [
+                    {
+                      "Fn::ImportValue": "HrbStatefulStack:ExportsOutputRefContentBucket52D4B12CF28429AF",
+                    },
+                    ".s3.ap-northeast-1.amazonaws.com",
+                  ],
+                ],
+              },
+              "Id": "HrbCdnStackContentDistributionOrigin14F90E592",
+              "OriginAccessControlId": {
+                "Fn::GetAtt": [
+                  "ContentDistributionOrigin1S3OriginAccessControlFF61F82A",
+                  "Id",
+                ],
+              },
+              "S3OriginConfig": {
+                "OriginAccessIdentity": "",
+              },
+            },
+          ],
+          "WebACLId": {
+            "Fn::GetAtt": [
+              "ExportsReader8B249524",
+              "/cdk/exports/HrbCdnStack/HrbEdgeStackuseast1FnGetAttContentWebAclArn99FC4DF4",
+            ],
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::Distribution",
+    },
+    "ContentDistributionIdParamB481521C": {
+      "Properties": {
+        "Name": "/hrb/content-distribution-id",
+        "Type": "String",
+        "Value": {
+          "Ref": "ContentDistribution1BFD83AE",
+        },
+      },
+      "Type": "AWS::SSM::Parameter",
+    },
+    "ContentDistributionOrigin1S3OriginAccessControlFF61F82A": {
+      "Properties": {
+        "OriginAccessControlConfig": {
+          "Name": "HrbCdnStackContentDistributiOrigin1S3OriginAccessControlE02D34C6",
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4",
+        },
+      },
+      "Type": "AWS::CloudFront::OriginAccessControl",
+    },
+    "ContentHeadersA4A280C7": {
+      "Properties": {
+        "ResponseHeadersPolicyConfig": {
+          "Comment": "Static security headers for uploaded report content",
+          "CustomHeadersConfig": {
+            "Items": [
+              {
+                "Header": "X-Robots-Tag",
+                "Override": true,
+                "Value": "noindex",
+              },
+            ],
+          },
+          "Name": "hrb-content-headers",
+          "SecurityHeadersConfig": {
+            "ContentSecurityPolicy": {
+              "ContentSecurityPolicy": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com https://cdn.tailwindcss.com https://fonts.googleapis.com; font-src 'self' data: https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com https://cdn.tailwindcss.com https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; form-action 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'",
+              "Override": true,
+            },
+            "ContentTypeOptions": {
+              "Override": true,
+            },
+            "ReferrerPolicy": {
+              "Override": true,
+              "ReferrerPolicy": "no-referrer",
+            },
+          },
+        },
+      },
+      "Type": "AWS::CloudFront::ResponseHeadersPolicy",
+    },
+    "ContentRequestFunction9374C17A": {
+      "Properties": {
+        "AutoPublish": true,
+        "FunctionCode": 
+"function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
+  if (uri !== '/r' && uri.indexOf('/r/') !== 0) {
+    return { statusCode: 404, statusDescription: 'Not Found' };
+  }
+  var segments = uri.split('/');
+  for (var i = 0; i < segments.length; i++) {
+    if (segments[i].length > 0 && segments[i].charAt(0) === '.') {
+      return { statusCode: 404, statusDescription: 'Not Found' };
+    }
+  }
+  uri = '/reports' + uri.slice(2);
+  if (uri.endsWith('/')) {
+    uri += 'index.html';
+  }
+  request.uri = uri;
+  return request;
+}"
+,
+        "FunctionConfig": {
+          "Comment": "404 dot-keys, restrict to /r/*, rewrite to reports/* keys",
+          "Runtime": "cloudfront-js-2.0",
+        },
+        "Name": "hrb-content-request",
+      },
+      "Type": "AWS::CloudFront::Function",
+    },
+    "CustomCrossRegionExportReaderCustomResourceProviderHandler46647B68": {
+      "DependsOn": [
+        "CustomCrossRegionExportReaderCustomResourceProviderRole10531BBD",
+      ],
+      "Properties": {
+        "Code": {
+          "S3Bucket": "cdk-hnb659fds-assets-111111111111-ap-northeast-1",
+          "S3Key": "f8b7112ff78fd0b6fab4c6b048fc1da9945198135db9a1e6b1d5cb4599d5a3d2.zip",
+        },
+        "Handler": "__entrypoint__.handler",
+        "MemorySize": 128,
+        "Role": {
+          "Fn::GetAtt": [
+            "CustomCrossRegionExportReaderCustomResourceProviderRole10531BBD",
+            "Arn",
+          ],
+        },
+        "Runtime": "nodejs24.x",
+        "Timeout": 900,
+      },
+      "Type": "AWS::Lambda::Function",
+    },
+    "CustomCrossRegionExportReaderCustomResourceProviderRole10531BBD": {
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com",
+              },
+            },
+          ],
+          "Version": "2012-10-17",
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:\${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+          },
+        ],
+        "Policies": [
+          {
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "ssm:AddTagsToResource",
+                    "ssm:RemoveTagsFromResource",
+                    "ssm:GetParameters",
+                  ],
+                  "Effect": "Allow",
+                  "Resource": {
+                    "Fn::Join": [
+                      "",
+                      [
+                        "arn:",
+                        {
+                          "Ref": "AWS::Partition",
+                        },
+                        ":ssm:ap-northeast-1:111111111111:parameter/cdk/exports/HrbCdnStack/*",
+                      ],
+                    ],
+                  },
+                },
+              ],
+              "Version": "2012-10-17",
+            },
+            "PolicyName": "Inline",
+          },
+        ],
+      },
+      "Type": "AWS::IAM::Role",
+    },
+    "ExportsReader8B249524": {
+      "DeletionPolicy": "Delete",
+      "Properties": {
+        "ReaderProps": {
+          "imports": {
+            "/cdk/exports/HrbCdnStack/HrbEdgeStackuseast1FnGetAttAppWebAclArn9BEC1669": "{{resolve:ssm:/cdk/exports/HrbCdnStack/HrbEdgeStackuseast1FnGetAttAppWebAclArn9BEC1669}}",
+            "/cdk/exports/HrbCdnStack/HrbEdgeStackuseast1FnGetAttContentWebAclArn99FC4DF4": "{{resolve:ssm:/cdk/exports/HrbCdnStack/HrbEdgeStackuseast1FnGetAttContentWebAclArn99FC4DF4}}",
+          },
+          "prefix": "HrbCdnStack",
+          "region": "ap-northeast-1",
+        },
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "CustomCrossRegionExportReaderCustomResourceProviderHandler46647B68",
+            "Arn",
+          ],
+        },
+      },
+      "Type": "Custom::CrossRegionExportReader",
+      "UpdateReplacePolicy": "Delete",
+    },
+  },
+  "Rules": {
+    "CheckBootstrapVersion": {
+      "Assertions": [
+        {
+          "Assert": {
+            "Fn::Not": [
+              {
+                "Fn::Contains": [
+                  [
+                    "1",
+                    "2",
+                    "3",
+                    "4",
+                    "5",
+                  ],
+                  {
+                    "Ref": "BootstrapVersion",
+                  },
+                ],
+              },
+            ],
+          },
+          "AssertDescription": "CDK bootstrap stack version 6 required. Please run 'cdk bootstrap' with a recent version of the CDK CLI.",
+        },
+      ],
+    },
+  },
+}
+`;
