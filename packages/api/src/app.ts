@@ -26,6 +26,7 @@ import {
   MAX_ZIP_UNCOMPRESSED_BYTES,
   PaginationQuerySchema,
   SearchQuerySchema,
+  UpdateReportContentRequestSchema,
   UpdateReportRequestSchema,
   makeError,
   toOwnedReport,
@@ -260,6 +261,30 @@ export function createApp(ctx: AppContext): AppType {
     });
   });
 
+  app.post("/reports/:id/publish", requireAuth, async (c) => {
+    const { report, url } = await ctx.service.publish(mustUser(c), c.req.param("id"));
+    return c.json({ report: toOwnedReport(report), url });
+  });
+
+  app.post("/reports/:id/unpublish", requireAuth, async (c) => {
+    const report = await ctx.service.unpublish(mustUser(c), c.req.param("id"));
+    return c.json({ report: toOwnedReport(report) });
+  });
+
+  app.get("/reports/:id/source", requireAuth, async (c) => {
+    const source = await ctx.service.getSource(mustUser(c), c.req.param("id"));
+    return c.json(source);
+  });
+
+  app.put("/reports/:id/content", requireAuth, async (c) => {
+    const body = parseWith(UpdateReportContentRequestSchema, await readJson(c), "content");
+    const { report, url } = await ctx.service.editContent(mustUser(c), c.req.param("id"), body.html);
+    return c.json({
+      report: toOwnedReport(report),
+      ...(url !== undefined ? { url } : {}),
+    });
+  });
+
   app.patch("/reports/:id", requireAuth, async (c) => {
     const body = parseWith(UpdateReportRequestSchema, await readJson(c), "report update");
     const report = await ctx.service.update(mustUser(c), c.req.param("id"), body);
@@ -289,19 +314,19 @@ export function createApp(ctx: AppContext): AppType {
     });
   });
 
+  app.get("/admin/flagged", async (c) => {
+    const items = await ctx.service.adminListFlagged(mustUser(c));
+    return c.json({ items });
+  });
+
   app.get("/admin/reports/:id/flags", async (c) => {
     const flags = await ctx.service.adminListFlags(mustUser(c), c.req.param("id"));
     return c.json({ flags });
   });
 
-  app.post("/admin/reports/:id/approve", async (c) => {
-    const report = await ctx.service.adminApprove(mustUser(c), c.req.param("id"));
-    return c.json({ report });
-  });
-
-  app.post("/admin/reports/:id/reject", async (c) => {
-    const report = await ctx.service.adminReject(mustUser(c), c.req.param("id"));
-    return c.json({ report });
+  app.delete("/admin/reports/:id/flags", async (c) => {
+    await ctx.service.adminClearFlags(mustUser(c), c.req.param("id"));
+    return c.json({ ok: true as const });
   });
 
   app.post("/admin/reports/:id/takedown", async (c) => {

@@ -19,7 +19,7 @@ HTML Report Box — 単一 HTML レポートの社内共有ホスティング。
 - **Ports & Adapters**: `core/src/ports.ts` の IF（ReportRepository / SearchIndex / ObjectStorage / AuthVerifier …）に local/aws の 2 実装。同一 Hono アプリがローカル Bun と Lambda(Node 22) 両方で動く
 - **ランタイム境界**: Lambda 搭載コード（shared/core/scanner/api/mcp）は Node 22 互換必須。Bun 専用 API（`Bun.file` 等）は `core/src/local/`・`api/src/local/`・`packages/web`・scripts のみ許可
 - **オリジン分離**: アップロード HTML は別 CloudFront/別オリジンから cookieless 配信。共有 URL はシェルページ `/reports/:id`、sandbox iframe 埋め込み
-- **アップロードフロー**: `POST /api/reports`（META+presigned）→ staging 直 PUT → `POST /api/reports/:id/complete`（検証・本文抽出・スキャン）。pass→published、warn→pending_review（admin 承認）、block→rejected。上書きは必ずフルスキャン再実行
+- **アップロードフロー / 可視性（2026-07 刷新）**: `POST /api/reports`（META status=private + presigned）→ staging 直 PUT → `POST /api/reports/:id/complete`（検証・本文抽出・スキャン）。pass/warn → 原本を `sources/<id>/current` に保存して private（公開中の上書きは公開のまま再公開）、block → rejected。ステータスは private/published/rejected/takedown の4種（processing・pending_review は廃止）。公開/非公開はオーナーが `publish`/`unpublish` で自己切替（admin 事前承認なし）。非公開でもオーナー/admin は `GET /reports/:id/source`（非公開プレビュー・srcdoc埋め込み）、`PUT /reports/:id/content` で HTML 直接編集（html kind のみ・フルスキャン+クォータ消費）。「content バケットに存在=公開中」の不変条件は維持（原本は sources/ プレフィックス、/r/ からは到達不能）。admin モデレーションは通報一覧（GET /admin/flagged）+ テイクダウン + 通報解決（DELETE /admin/reports/:id/flags）。上書き・編集は必ずフルスキャン再実行
 - **検索**: DynamoDB 転置インデックス（OpenSearch 不使用）。重み: タイトル+8 / 説明+4 / 本文+1
 - エラーは常に `{error:{code,message}}`、`DomainError.httpStatus` がステータス決定。ルート保護は宣言的（public / requireAuth / requireAdmin）
 

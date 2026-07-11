@@ -5,11 +5,12 @@
  *   HRB_DATA_DIR=/tmp/e2e bun packages/api/src/local/server.ts &
  *   bun scripts/smoke.ts            # SMOKE_BASE_URL to override :3000
  *
- * Covers: config → seed list → search → upload (html + zip) → content
- * serving → scanner verdicts (block: eval+atob / zip-slip / phishing combo,
- * warn: external form action → pending_review → admin approve) → overwrite
- * (version+1, stale search postings swept) → abuse flags (+rate limit) →
- * admin takedown → authz denials → delete → MCP search/get/list → SPA.
+ * Covers: config → seed list → search → upload (html + zip → private →
+ * publish) → content serving → scanner verdicts (block: eval+atob / zip-slip
+ * / phishing combo, warn: private + owner self-publish) → unpublish/republish
+ * + source + direct HTML edit → overwrite (version+1, stale search postings
+ * swept) → abuse flags (+rate limit, admin flagged list/clear) → admin
+ * takedown → authz denials → delete → MCP search/get/list → SPA.
  */
 const BASE = process.env.SMOKE_BASE_URL ?? "http://localhost:3000";
 const RUN = Date.now().toString(36); // unique per run; survives reruns on a dirty data dir
@@ -88,6 +89,12 @@ async function uploadFlow(opts: {
     body: JSON.stringify({ key: upload.fields.key }),
   });
   return { step: "complete", status: compRes.status, id, body: await json(compRes) } as const;
+}
+
+/** POST /api/reports/:id/publish（新モデル: complete は private で終わる） */
+async function publishReport(id: string, headers: Record<string, string> = alice) {
+  const res = await fetch(`${BASE}/api/reports/${id}/publish`, { method: "POST", headers });
+  return { status: res.status, body: await json(res) };
 }
 
 async function searchIds(q: string): Promise<string[]> {
@@ -217,7 +224,8 @@ function toolJson(rpc: Record<string, any>): Record<string, any> {
   const res = await fetch(`${BASE}/api/reports`);
   const body = await json(res);
   const n = (body.reports ?? []).length;
-  check("GET /api/reports (seed)", res.status === 200 && n >= 3, `${res.status} reports=${n}`);
+  // seed はデモ用に 2 件公開 + 1 件非公開を投入する
+  check("GET /api/reports (seed, published only)", res.status === 200 && n >= 2, `${res.status} reports=${n}`);
 }
 
 {
@@ -226,7 +234,7 @@ function toolJson(rpc: Record<string, any>): Record<string, any> {
 }
 
 // ===========================================================================
-// 2. benign HTML upload → published → /r/ serving
+// 2. benign HTML upload → private → owner publish → /r/ serving
 // ===========================================================================
 
 const htmlV1 = `<!doctype html><html><head><title>smoke html ${RUN}</title></head><body><h1>スモーク良性HTML</h1><p>oldtok${RUN}</p></body></html>`;
@@ -235,9 +243,16 @@ const htmlId = benign.id ?? "";
 {
   const r = (benign as any).body?.report;
   check(
-    "html upload → published (v1)",
-    benign.step === "complete" && benign.status === 200 && r?.status === "published" && r?.version === 1 && r?.verdict === "pass",
+    "html upload → private (v1, pass)",
+    benign.step === "complete" && benign.status === 200 && r?.status === "private" && r?.version === 1 && r?.verdict === "pass",
     `step=${benign.step} http=${benign.status} status=${r?.status} version=${r?.version} verdict=${r?.verdict}`,
+  );
+  const beforePublish = await fetch(`${BASE}/r/${htmlId}/`);
+  const pub = await publishReport(htmlId);
+  check(
+    "owner publish → published + url (content 404 until then)",
+    beforePublish.status === 404 && pub.status === 200 && pub.body.report?.status === "published" && typeof pub.body.url === "string",
+    `before=${beforePublish.status} publish=${pub.status}→${pub.body.report?.status} url=${pub.body.url}`,
   );
 }
 
@@ -269,10 +284,11 @@ const zipUp = await uploadFlow({ title: `smoke 良性ZIP ${RUN}`, kind: "zip", d
 const zipId = zipUp.id ?? "";
 {
   const r = (zipUp as any).body?.report;
+  const pub = await publishReport(zipId);
   check(
-    "zip upload → published",
-    zipUp.step === "complete" && zipUp.status === 200 && r?.status === "published" && r?.kind === "zip",
-    `step=${zipUp.step} http=${zipUp.status} status=${r?.status} kind=${r?.kind} findings=${JSON.stringify(r?.findings)?.slice(0, 160)}`,
+    "zip upload → private → publish",
+    zipUp.step === "complete" && zipUp.status === 200 && r?.status === "private" && r?.kind === "zip" && pub.status === 200 && pub.body.report?.status === "published",
+    `step=${zipUp.step} http=${zipUp.status} status=${r?.status} kind=${r?.kind} publish=${pub.status} findings=${JSON.stringify(r?.findings)?.slice(0, 160)}`,
   );
 }
 
@@ -350,7 +366,7 @@ const zipSlip = makeZip([
 }
 
 // ===========================================================================
-// 5. warn → pending_review → admin approve → published
+// 5. warn → private（findings 付き）→ オーナー自身が公開（管理者承認は不要）
 //    (external form action WITHOUT password: warn by design; adding a
 //     password upgrades it to the phishing-form BLOCK verified in 4c)
 // ===========================================================================
@@ -365,8 +381,8 @@ const warnId = warnUp.id ?? "";
   const r = (warnUp as any).body?.report;
   const findings = JSON.stringify(r?.findings ?? []);
   check(
-    "external-action form → pending_review (warn)",
-    warnUp.step === "complete" && r?.status === "pending_review" && r?.verdict === "warn" && findings.includes("external-form-action"),
+    "external-action form → private (warn, findings preserved)",
+    warnUp.step === "complete" && r?.status === "private" && r?.verdict === "warn" && findings.includes("external-form-action"),
     `step=${warnUp.step} status=${r?.status} verdict=${r?.verdict} findings=${findings.slice(0, 200)}`,
   );
 }
@@ -376,25 +392,67 @@ const warnId = warnUp.id ?? "";
   const content = await fetch(`${BASE}/r/${warnId}/`);
   const owner = await fetch(`${BASE}/api/reports/${warnId}`, { headers: alice });
   check(
-    "pending_review hidden (anon 404, content 404, owner 200)",
+    "private hidden (anon 404, content 404, owner 200)",
     anon.status === 404 && content.status === 404 && owner.status === 200,
     `anon=${anon.status} content=${content.status} owner=${owner.status}`,
   );
 }
 
 {
-  const listRes = await fetch(`${BASE}/api/admin/reports?status=pending_review`, { headers: admin });
-  const list = await json(listRes);
-  const inQueue = ((list.reports ?? []) as any[]).some((r) => r.id === warnId);
-  const apRes = await fetch(`${BASE}/api/admin/reports/${warnId}/approve`, { method: "POST", headers: admin });
-  const ap = await json(apRes);
+  const pub = await publishReport(warnId);
   const served = await fetch(`${BASE}/r/${warnId}/`);
   const servedText = await served.text();
   const hits = await searchIds(`warnbody${RUN}`);
   check(
-    "admin approve: pending_review → published + served + indexed",
-    inQueue && apRes.status === 200 && ap.report?.status === "published" && served.status === 200 && servedText.includes(`warnbody${RUN}`) && hits.includes(warnId),
-    `inQueue=${inQueue} approve=${apRes.status}→${ap.report?.status} served=${served.status} searchHit=${hits.includes(warnId)}`,
+    "owner publish (warn): private → published + served + indexed",
+    pub.status === 200 && pub.body.report?.status === "published" && pub.body.report?.verdict === "warn" && served.status === 200 && servedText.includes(`warnbody${RUN}`) && hits.includes(warnId),
+    `publish=${pub.status}→${pub.body.report?.status} served=${served.status} searchHit=${hits.includes(warnId)}`,
+  );
+}
+
+// ===========================================================================
+// 5.5 unpublish/republish + source + direct HTML edit
+// ===========================================================================
+
+{
+  const un = await fetch(`${BASE}/api/reports/${htmlId}/unpublish`, { method: "POST", headers: alice });
+  const unBody = await json(un);
+  const hidden = await fetch(`${BASE}/r/${htmlId}/`);
+  const anonMeta = await fetch(`${BASE}/api/reports/${htmlId}`);
+  const hits = await searchIds(`oldtok${RUN}`);
+  const src = await fetch(`${BASE}/api/reports/${htmlId}/source`, { headers: alice });
+  const srcBody = await json(src);
+  const srcDenied = await fetch(`${BASE}/api/reports/${htmlId}/source`, { headers: bob });
+  check(
+    "unpublish → hidden everywhere, source still readable by owner only",
+    un.status === 200 && unBody.report?.status === "private" && hidden.status === 404 && anonMeta.status === 404 && hits.length === 0 && src.status === 200 && String(srcBody.html ?? "").includes(`oldtok${RUN}`) && srcDenied.status === 403,
+    `unpublish=${un.status}→${unBody.report?.status} content=${hidden.status} meta=${anonMeta.status} hits=${hits.length} source=${src.status} sourceDenied=${srcDenied.status}`,
+  );
+  const re = await publishReport(htmlId);
+  const back = await fetch(`${BASE}/r/${htmlId}/`);
+  check(
+    "republish → served again",
+    re.status === 200 && re.body.report?.status === "published" && back.status === 200,
+    `publish=${re.status}→${re.body.report?.status} content=${back.status}`,
+  );
+}
+
+{
+  const editRes = await fetch(`${BASE}/api/reports/${htmlId}/content`, {
+    method: "PUT",
+    headers: alice,
+    body: JSON.stringify({
+      html: `<!doctype html><html><head><title>smoke html edited ${RUN}</title></head><body><h1>直接編集版</h1><p>edittok${RUN}</p></body></html>`,
+    }),
+  });
+  const edit = await json(editRes);
+  const served = await fetch(`${BASE}/r/${htmlId}/`);
+  const servedText = await served.text();
+  const hits = await searchIds(`edittok${RUN}`);
+  check(
+    "direct HTML edit → version+1, re-scanned, published content updated",
+    editRes.status === 200 && edit.report?.version === 2 && edit.report?.status === "published" && served.status === 200 && servedText.includes(`edittok${RUN}`) && hits.includes(htmlId),
+    `edit=${editRes.status} version=${edit.report?.version} status=${edit.report?.status} served=${servedText.includes(`edittok${RUN}`)} indexed=${hits.includes(htmlId)}`,
   );
 }
 
@@ -403,30 +461,30 @@ const warnId = warnUp.id ?? "";
 // ===========================================================================
 
 {
-  const before = await searchIds(`oldtok${RUN}`);
-  check("search finds v1 body token before overwrite", before.includes(htmlId), `hits=${JSON.stringify(before)}`);
+  const before = await searchIds(`edittok${RUN}`);
+  check("search finds edited body token before overwrite", before.includes(htmlId), `hits=${JSON.stringify(before)}`);
 }
 
 {
   const res = await uploadFlow({
     overwriteId: htmlId,
     kind: "html",
-    data: `<!doctype html><html><head><title>smoke html v2 ${RUN}</title></head><body><h1>上書き版</h1><p>newtok${RUN}</p></body></html>`,
+    data: `<!doctype html><html><head><title>smoke html v3 ${RUN}</title></head><body><h1>上書き版</h1><p>newtok${RUN}</p></body></html>`,
   });
   const r = (res as any).body?.report;
   check(
-    "overwrite → published version 2",
-    res.step === "complete" && res.status === 200 && r?.status === "published" && r?.version === 2,
+    "overwrite of published report → stays published, version 3",
+    res.step === "complete" && res.status === 200 && r?.status === "published" && r?.version === 3,
     `step=${res.step} http=${res.status} status=${r?.status} version=${r?.version}`,
   );
-  const oldHits = await searchIds(`oldtok${RUN}`);
+  const oldHits = await searchIds(`edittok${RUN}`);
   const newHits = await searchIds(`newtok${RUN}`);
   const served = await fetch(`${BASE}/r/${htmlId}/`);
   const servedText = await served.text();
   check(
     "overwrite sweeps old postings + indexes/serves new content",
-    oldHits.length === 0 && newHits.includes(htmlId) && served.status === 200 && servedText.includes(`newtok${RUN}`) && !servedText.includes(`oldtok${RUN}`),
-    `oldHits=${oldHits.length} newHit=${newHits.includes(htmlId)} served=${served.status} v2Body=${servedText.includes(`newtok${RUN}`)}`,
+    oldHits.length === 0 && newHits.includes(htmlId) && served.status === 200 && servedText.includes(`newtok${RUN}`) && !servedText.includes(`edittok${RUN}`),
+    `oldHits=${oldHits.length} newHit=${newHits.includes(htmlId)} served=${served.status} v3Body=${servedText.includes(`newtok${RUN}`)}`,
   );
 }
 
@@ -461,6 +519,19 @@ const warnId = warnUp.id ?? "";
     "admin sees flags (5), non-admin denied (403)",
     flagsRes.status === 200 && mine.length === 5 && denied.status === 403,
     `admin=${flagsRes.status} flags=${mine.length} nonAdmin=${denied.status}`,
+  );
+
+  // 通報一覧（管理画面の新キュー）に載り、解決でクリアできる
+  const flaggedRes = await fetch(`${BASE}/api/admin/flagged`, { headers: admin });
+  const flagged = await json(flaggedRes);
+  const entry = ((flagged.items ?? []) as any[]).find((i) => i.report?.id === zipId);
+  const clearRes = await fetch(`${BASE}/api/admin/reports/${zipId}/flags`, { method: "DELETE", headers: admin });
+  const flaggedAfter = await json(await fetch(`${BASE}/api/admin/flagged`, { headers: admin }));
+  const stillThere = ((flaggedAfter.items ?? []) as any[]).some((i) => i.report?.id === zipId);
+  check(
+    "admin flagged list: zip report listed, clear resolves it",
+    flaggedRes.status === 200 && entry !== undefined && entry.flags.length >= 5 && clearRes.status === 200 && !stillThere,
+    `flagged=${flaggedRes.status} entryFlags=${entry?.flags?.length} clear=${clearRes.status} after=${stillThere}`,
   );
 }
 
@@ -525,7 +596,7 @@ const warnId = warnUp.id ?? "";
   const got = toolJson(await mcpCall("tools/call", { name: "get_report", arguments: { id: htmlId } }));
   check(
     "MCP get_report (meta + extracted text)",
-    got.report?.id === htmlId && got.report?.version === 2 && String(got.extractedText ?? "").includes(`newtok${RUN}`),
+    got.report?.id === htmlId && got.report?.version === 3 && String(got.extractedText ?? "").includes(`newtok${RUN}`),
     `id=${got.report?.id} version=${got.report?.version} textHasToken=${String(got.extractedText ?? "").includes(`newtok${RUN}`)}`,
   );
 

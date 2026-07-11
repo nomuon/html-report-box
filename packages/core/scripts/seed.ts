@@ -9,6 +9,8 @@ interface Sample {
   description: string;
   owner: string;
   html: string;
+  /** false のままだと非公開（公開トグルのデモ用） */
+  publish?: boolean;
 }
 
 const page = (title: string, description: string, body: string): string => `<!doctype html>
@@ -88,6 +90,7 @@ const SAMPLES: Sample[] = [
     title: "競合調査: 社内ドキュメント共有ツール比較",
     description: "Notion / Confluence / esa / Kibela の機能・料金比較と推奨案",
     owner: "bob",
+    publish: false,
     html: page(
       "競合調査: 社内ドキュメント共有ツール比較",
       "Notion / Confluence / esa / Kibela の機能・料金比較と推奨案",
@@ -127,7 +130,12 @@ async function main(): Promise<void> {
     });
     await ctx.storage.putStagingObject(upload.key, encoder.encode(sample.html));
     const done = await ctx.service.complete(user, report.id, upload.key);
-    console.log(`seeded: ${sample.title} → ${done.url ?? done.report.status}`);
+    if (sample.publish !== false && done.report.status === "private") {
+      const { url } = await ctx.service.publish(user, report.id);
+      console.log(`seeded: ${sample.title} → published ${url}`);
+    } else {
+      console.log(`seeded: ${sample.title} → ${done.url ?? done.report.status}`);
+    }
   }
   console.log("seed complete.");
 }

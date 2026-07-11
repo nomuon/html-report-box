@@ -47,6 +47,15 @@ export class LocalReportRepository implements ReportRepository {
       quotas: {},
       flags: {},
     }));
+    // 2026-07 の可視性モデル刷新（processing / pending_review 廃止）前の dev
+    // データを private に読み替える。旧レコードは sources/ を持たないため、
+    // 再公開には再アップロードが必要（publish が conflict で案内する）。
+    this.store.mutate((db) => {
+      for (const meta of Object.values(db.reports)) {
+        const legacy = meta.status as string;
+        if (legacy === "processing" || legacy === "pending_review") meta.status = "private";
+      }
+    });
   }
 
   async create(meta: ReportMeta): Promise<void> {
@@ -162,5 +171,18 @@ export class LocalReportRepository implements ReportRepository {
 
   async listFlags(id: string): Promise<ReportFlag[]> {
     return structuredClone(this.store.get().flags[id] ?? []);
+  }
+
+  async listFlagged(): Promise<Array<{ id: string; flags: ReportFlag[] }>> {
+    const db = this.store.get();
+    return Object.entries(db.flags)
+      .filter(([, flags]) => flags.length > 0)
+      .map(([id, flags]) => ({ id, flags: structuredClone(flags) }));
+  }
+
+  async clearFlags(id: string): Promise<void> {
+    this.store.mutate((db) => {
+      delete db.flags[id];
+    });
   }
 }

@@ -1,4 +1,4 @@
-/** 画面⑤: 管理画面 (`/admin`) — 承認キュー / 全レポート / ユーザー管理 */
+/** 画面⑤: 管理画面 (`/admin`) — 通報 / 全レポート / ユーザー管理 */
 import { useState } from "react";
 import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,10 +14,10 @@ import { useToast } from "../components/Toast.tsx";
 import { isApiError } from "../lib/api.ts";
 import { formatDateTime } from "../lib/format.ts";
 
-type Tab = "queue" | "all" | "users";
+type Tab = "flagged" | "all" | "users";
 
 type Confirm =
-  | { kind: "approve" | "reject" | "takedown"; report: AdminReport }
+  | { kind: "takedown" | "clear-flags"; report: AdminReport }
   | { kind: "set-admin"; user: AdminUser; isAdmin: boolean }
   | null;
 
@@ -27,24 +27,26 @@ function useAdminInvalidate() {
   const qc = useQueryClient();
   return () => {
     void qc.invalidateQueries({ queryKey: ["admin-reports"] });
+    void qc.invalidateQueries({ queryKey: ["admin-flagged"] });
     void qc.invalidateQueries({ queryKey: ["reports"] });
     void qc.invalidateQueries({ queryKey: ["my-reports"] });
   };
 }
 
-// ---- 承認キュー ----
+// ---- 通報（abuse flags のあるレポート一覧） ----
 
-function QueueTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
+function FlaggedTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
   const { api } = useApp();
+  const [flagsFor, setFlagsFor] = useState<AdminReport | null>(null);
   const query = useQuery({
-    queryKey: ["admin-reports", "pending_review"],
-    queryFn: () => api.adminListReports({ status: "pending_review" }),
+    queryKey: ["admin-flagged"],
+    queryFn: () => api.adminListFlagged(),
   });
-  const reports = query.data?.reports ?? [];
+  const items = query.data?.items ?? [];
 
   if (query.isLoading) return <p className="hrb-loading">読み込み中…</p>;
-  if (reports.length === 0)
-    return <EmptyState icon={<Icon name="check-circle" size={30} />} title="承認待ちのレポートはありません" />;
+  if (items.length === 0)
+    return <EmptyState icon={<Icon name="check-circle" size={30} />} title="未対応の通報はありません" />;
 
   return (
     <div className="hrb-table-wrap">
@@ -53,48 +55,62 @@ function QueueTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
           <tr>
             <th>タイトル</th>
             <th>作成者</th>
-            <th>検知内容</th>
-            <th>申請日時</th>
+            <th>ステータス</th>
+            <th>通報</th>
+            <th>最終通報日時</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          {reports.map((r) => (
-            <tr key={r.id}>
-              <td>
-                <span className="hrb-table__title">{r.title}</span>
-              </td>
-              <td>{r.ownerName}</td>
-              <td>
-                <div className="hrb-finding-chips">
-                  {r.findings.map((f, i) => (
-                    <span key={i} className="hrb-finding-chip" title={f.message}>
-                      {f.ruleId}
-                    </span>
-                  ))}
-                </div>
-              </td>
-              <td className="hrb-table__date">{formatDateTime(r.updatedAt)}</td>
-              <td>
-                <div className="hrb-row-actions">
-                  <Link to={`/reports/${r.id}`} target="_blank" rel="noreferrer">
-                    <Button variant="secondary">プレビュー</Button>
+          {items.map(({ report: r, flags }) => {
+            const latest = flags.reduce((max, f) => (f.createdAt > max ? f.createdAt : max), "");
+            return (
+              <tr key={r.id}>
+                <td>
+                  <Link to={`/reports/${r.id}`} className="hrb-table__title">
+                    {r.title}
                   </Link>
-                  <Button
-                    className="hrb-btn--success"
-                    onClick={() => onConfirm({ kind: "approve", report: r })}
+                </td>
+                <td>{r.ownerName}</td>
+                <td>
+                  <StatusChip status={r.status} />
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    className="hrb-flag-count"
+                    title={flags[flags.length - 1]?.reason}
+                    onClick={() => setFlagsFor(r)}
                   >
-                    承認
-                  </Button>
-                  <Button variant="danger" onClick={() => onConfirm({ kind: "reject", report: r })}>
-                    却下
-                  </Button>
-                </div>
-              </td>
-            </tr>
-          ))}
+                    <Icon name="flag" size={14} />
+                    {flags.length}件
+                  </button>
+                </td>
+                <td className="hrb-table__date">{latest ? formatDateTime(latest) : "-"}</td>
+                <td>
+                  <div className="hrb-row-actions">
+                    <Link to={`/reports/${r.id}`} target="_blank" rel="noreferrer">
+                      <Button variant="secondary">プレビュー</Button>
+                    </Link>
+                    {r.status === "published" && (
+                      <Button
+                        variant="danger"
+                        onClick={() => onConfirm({ kind: "takedown", report: r })}
+                      >
+                        テイクダウン
+                      </Button>
+                    )}
+                    <Button variant="ghost" onClick={() => onConfirm({ kind: "clear-flags", report: r })}>
+                      通報を解決
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+      {flagsFor && <FlagsModal report={flagsFor} onClose={() => setFlagsFor(null)} />}
     </div>
   );
 }
@@ -129,7 +145,6 @@ function FlagsModal({ report, onClose }: { report: AdminReport; onClose: () => v
 function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
   const { api } = useApp();
   const [statusFilter, setStatusFilter] = useState<Set<ReportStatus>>(new Set());
-  const [flagsFor, setFlagsFor] = useState<AdminReport | null>(null);
 
   const query = useQuery({
     queryKey: ["admin-reports", "all"],
@@ -200,9 +215,6 @@ function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
                   <td className="hrb-table__date">{formatDateTime(r.updatedAt)}</td>
                   <td>
                     <div className="hrb-row-actions">
-                      <Button variant="ghost" onClick={() => setFlagsFor(r)}>
-                        通報
-                      </Button>
                       {r.status === "published" && (
                         <Button
                           variant="danger"
@@ -219,8 +231,6 @@ function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
           </table>
         </div>
       )}
-
-      {flagsFor && <FlagsModal report={flagsFor} onClose={() => setFlagsFor(null)} />}
     </div>
   );
 }
@@ -280,21 +290,18 @@ export function AdminPage() {
   const toast = useToast();
   const invalidate = useAdminInvalidate();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>("queue");
+  const [tab, setTab] = useState<Tab>("flagged");
   const [confirm, setConfirm] = useState<Confirm>(null);
 
   const mutation = useMutation({
     mutationFn: async (c: NonNullable<Confirm>) => {
       switch (c.kind) {
-        case "approve":
-          await api.adminApprove(c.report.id);
-          return "レポートを承認し公開しました";
-        case "reject":
-          await api.adminReject(c.report.id);
-          return "レポートを却下しました";
         case "takedown":
           await api.adminTakedown(c.report.id);
-          return "レポートを非公開にしました";
+          return "レポートを公開停止しました";
+        case "clear-flags":
+          await api.adminClearFlags(c.report.id);
+          return "通報を解決済みにしました";
         case "set-admin":
           await api.adminSetAdmin(c.user.username, c.isAdmin);
           return "権限を更新しました";
@@ -322,23 +329,17 @@ export function AdminPage() {
 
   const confirmText = (c: NonNullable<Confirm>): { title: string; body: string; label: string } => {
     switch (c.kind) {
-      case "approve":
-        return {
-          title: "レポートを承認",
-          body: `「${c.report.title}」を承認して公開しますか？`,
-          label: "承認する",
-        };
-      case "reject":
-        return {
-          title: "レポートを却下",
-          body: `「${c.report.title}」を却下しますか？`,
-          label: "却下する",
-        };
       case "takedown":
         return {
           title: "テイクダウン",
-          body: "公開を停止し削除します。よろしいですか？",
+          body: `「${c.report.title}」の公開を強制停止します。オーナーは再公開できなくなります。よろしいですか？`,
           label: "テイクダウン",
+        };
+      case "clear-flags":
+        return {
+          title: "通報を解決",
+          body: `「${c.report.title}」への通報をすべて解決済みにして一覧から消します。よろしいですか？`,
+          label: "解決済みにする",
         };
       case "set-admin":
         return {
@@ -358,7 +359,7 @@ export function AdminPage() {
       <div className="hrb-tabs" role="tablist">
         {(
           [
-            ["queue", "承認キュー"],
+            ["flagged", "通報"],
             ["all", "全レポート"],
             ["users", "ユーザー管理"],
           ] as const
@@ -376,7 +377,7 @@ export function AdminPage() {
         ))}
       </div>
 
-      {tab === "queue" && <QueueTab onConfirm={setConfirm} />}
+      {tab === "flagged" && <FlaggedTab onConfirm={setConfirm} />}
       {tab === "all" && <AllReportsTab onConfirm={setConfirm} />}
       {tab === "users" && <UsersTab onConfirm={setConfirm} />}
 
@@ -392,7 +393,7 @@ export function AdminPage() {
                 キャンセル
               </Button>
               <Button
-                variant={confirm.kind === "approve" ? "primary" : "danger"}
+                variant={confirm.kind === "clear-flags" ? "primary" : "danger"}
                 loading={mutation.isPending}
                 onClick={() => mutation.mutate(confirm)}
               >

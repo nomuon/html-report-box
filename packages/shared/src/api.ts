@@ -9,6 +9,7 @@ import {
   OwnedReportSchema,
   PublicReportSchema,
   ReportDescriptionSchema,
+  ReportFlagSchema,
   ReportKindSchema,
   ReportStatusSchema,
   ReportTitleSchema,
@@ -161,7 +162,7 @@ export const MyReportsResponseSchema = z.object({
 export type MyReportsResponse = z.infer<typeof MyReportsResponseSchema>;
 
 // =====================
-// POST /reports (auth) — create META (status=processing) + issue presigned POST
+// POST /reports (auth) — create META (status=private) + issue presigned POST
 // =====================
 export const CreateReportRequestSchema = z.object({
   title: ReportTitleSchema,
@@ -191,7 +192,8 @@ export const CreateUploadUrlResponseSchema = z.object({
 export type CreateUploadUrlResponse = z.infer<typeof CreateUploadUrlResponseSchema>;
 
 // =====================
-// POST /reports/:id/complete (auth, owner) — validate + scan + publish
+// POST /reports/:id/complete (auth, owner) — validate + scan + store
+// (already-published reports stay published; everything else lands private)
 // =====================
 export const CompleteReportRequestSchema = z.object({
   /** Staging key returned by the presigned upload. */
@@ -223,6 +225,49 @@ export const UpdateReportResponseSchema = z.object({
   report: OwnedReportSchema,
 });
 export type UpdateReportResponse = z.infer<typeof UpdateReportResponseSchema>;
+
+// =====================
+// POST /reports/:id/publish (auth, owner or admin) — private → published
+// =====================
+export const PublishReportResponseSchema = z.object({
+  report: OwnedReportSchema,
+  /** Content URL of the now-published report. */
+  url: z.string().min(1),
+});
+export type PublishReportResponse = z.infer<typeof PublishReportResponseSchema>;
+
+// =====================
+// POST /reports/:id/unpublish (auth, owner or admin) — published → private
+// =====================
+export const UnpublishReportResponseSchema = z.object({
+  report: OwnedReportSchema,
+});
+export type UnpublishReportResponse = z.infer<typeof UnpublishReportResponseSchema>;
+
+// =====================
+// GET /reports/:id/source (auth, owner or admin) — HTML for editing / private preview
+// =====================
+export const GetReportSourceResponseSchema = z.object({
+  kind: ReportKindSchema,
+  /** html kind: the uploaded source. zip kind: the extracted root index.html (read-only preview). */
+  html: z.string(),
+});
+export type GetReportSourceResponse = z.infer<typeof GetReportSourceResponseSchema>;
+
+// =====================
+// PUT /reports/:id/content (auth, owner or admin) — direct HTML edit (html kind only)
+// =====================
+export const UpdateReportContentRequestSchema = z.object({
+  html: z.string().min(1),
+});
+export type UpdateReportContentRequest = z.infer<typeof UpdateReportContentRequestSchema>;
+
+export const UpdateReportContentResponseSchema = z.object({
+  report: OwnedReportSchema,
+  /** Present when the report is (still) published. */
+  url: z.string().optional(),
+});
+export type UpdateReportContentResponse = z.infer<typeof UpdateReportContentResponseSchema>;
 
 // =====================
 // DELETE /reports/:id (auth, owner or admin)
@@ -258,13 +303,33 @@ export const AdminListReportsResponseSchema = z.object({
 });
 export type AdminListReportsResponse = z.infer<typeof AdminListReportsResponseSchema>;
 
-// POST /admin/reports/:id/approve — publish a pending_review report
-// POST /admin/reports/:id/reject   — reject a pending_review report
-// POST /admin/reports/:id/takedown — unpublish + purge a published report
+// POST /admin/reports/:id/takedown — force-unpublish + purge a report
 export const AdminReportActionResponseSchema = z.object({
   report: AdminReportSchema,
 });
 export type AdminReportActionResponse = z.infer<typeof AdminReportActionResponseSchema>;
+
+// GET /admin/flagged — reports that received abuse flags (通報), newest flag first
+export const AdminFlaggedReportSchema = z.object({
+  report: AdminReportSchema,
+  flags: z.array(ReportFlagSchema),
+});
+export type AdminFlaggedReport = z.infer<typeof AdminFlaggedReportSchema>;
+
+export const AdminListFlaggedResponseSchema = z.object({
+  items: z.array(AdminFlaggedReportSchema),
+});
+export type AdminListFlaggedResponse = z.infer<typeof AdminListFlaggedResponseSchema>;
+
+// GET /admin/reports/:id/flags — flags of one report
+export const AdminListFlagsResponseSchema = z.object({
+  flags: z.array(ReportFlagSchema),
+});
+export type AdminListFlagsResponse = z.infer<typeof AdminListFlagsResponseSchema>;
+
+// DELETE /admin/reports/:id/flags — resolve (clear) all flags of a report
+export const AdminClearFlagsResponseSchema = OkResponseSchema;
+export type AdminClearFlagsResponse = z.infer<typeof AdminClearFlagsResponseSchema>;
 
 // GET /admin/users
 export const AdminUserSchema = z.object({

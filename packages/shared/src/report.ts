@@ -5,13 +5,15 @@ import { z } from "zod";
 import { REPORT_ID_PATTERN } from "./constants.ts";
 
 // ---- Enums ----
-export const REPORT_STATUSES = [
-  "processing",
-  "published",
-  "rejected",
-  "pending_review",
-  "takedown",
-] as const;
+/**
+ * Lifecycle:
+ *   private   — exists but unlisted; owner/admin only (initial state, user can
+ *               publish/unpublish freely)
+ *   published — publicly listed, indexed and served
+ *   rejected  — latest upload was blocked by the security scan
+ *   takedown  — force-unpublished by an administrator
+ */
+export const REPORT_STATUSES = ["private", "published", "rejected", "takedown"] as const;
 export const ReportStatusSchema = z.enum(REPORT_STATUSES);
 export type ReportStatus = z.infer<typeof ReportStatusSchema>;
 
@@ -34,6 +36,15 @@ export const ScanFindingSchema = z.object({
   entryPath: z.string().optional(),
 });
 export type ScanFinding = z.infer<typeof ScanFindingSchema>;
+
+// ---- Abuse flag (通報) ----
+export const ReportFlagSchema = z.object({
+  reason: z.string().min(1),
+  createdAt: z.iso.datetime(),
+  /** Audit only; stripped from non-admin views. */
+  sourceIp: z.string().optional(),
+});
+export type ReportFlag = z.infer<typeof ReportFlagSchema>;
 
 // ---- Report id ----
 export const ReportIdSchema = z.string().regex(REPORT_ID_PATTERN, "invalid report id");
@@ -68,7 +79,7 @@ export const ReportMetaSchema = z.object({
   sizeBytes: z.number().int().nonnegative().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
-  /** Result of the latest security scan. Absent while status=processing. */
+  /** Result of the latest security scan. Absent until the first upload completes. */
   verdict: ScanVerdictSchema.optional(),
   findings: z.array(ScanFindingSchema).default([]),
   /** Audit trail (never exposed publicly). */

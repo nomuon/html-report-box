@@ -21,6 +21,9 @@ export type IconName =
   | "clock"
   | "check"
   | "check-circle"
+  | "code"
+  | "eye"
+  | "eye-off"
   | "x"
   | "x-circle"
   | "ban"
@@ -125,6 +128,20 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+  code: <path d="m8.5 7.5-4.5 4.5 4.5 4.5M15.5 7.5l4.5 4.5-4.5 4.5" />,
+  eye: (
+    <>
+      <path d="M2.8 12S6.5 5.8 12 5.8 21.2 12 21.2 12 17.5 18.2 12 18.2 2.8 12 2.8 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
+  "eye-off": (
+    <>
+      <path d="M4 4l16 16" />
+      <path d="M10.6 6.1A9.6 9.6 0 0 1 12 6c5.5 0 9.2 6 9.2 6a17.6 17.6 0 0 1-3 3.5M6.4 7.6A17 17 0 0 0 2.8 12S6.5 18 12 18c1.3 0 2.5-.3 3.6-.8" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+    </>
+  ),
   "check-circle": (
     <>
       <circle cx="12" cy="12" r="9" />

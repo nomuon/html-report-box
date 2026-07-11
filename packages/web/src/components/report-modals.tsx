@@ -1,10 +1,10 @@
 /**
- * レポート操作モーダル群（メタ編集 / 削除確認 / 上書きアップロード）。
+ * レポート操作モーダル群（メタ編集 / HTML直接編集 / 削除確認 / 上書きアップロード）。
  * マイレポートと詳細シェルで共用する。
  */
 import { useReducer, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import type { OwnedReport } from "@hrb/shared";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { OwnedReport, ScanFinding } from "@hrb/shared";
 import { useApp } from "../app-context.tsx";
 import { isApiError } from "../lib/api.ts";
 import { uploadToPresigned } from "../lib/upload.ts";
@@ -61,7 +61,7 @@ export function EditReportModal({
   return (
     <Modal
       open={open}
-      title="レポートを編集"
+      title="タイトル・説明を編集"
       onClose={onClose}
       footer={
         <>
@@ -88,6 +88,120 @@ export function EditReportModal({
           onChange={(e) => setDescription(e.target.value)}
         />
       </label>
+    </Modal>
+  );
+}
+
+// ---- HTML 直接編集 ----
+
+export function EditHtmlModal({
+  report,
+  open,
+  onClose,
+}: {
+  report: Pick<OwnedReport, "id" | "title" | "kind" | "status">;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const { api } = useApp();
+  const toast = useToast();
+  const invalidate = useInvalidateReports();
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [rejectedFindings, setRejectedFindings] = useState<ScanFinding[] | null>(null);
+
+  const source = useQuery({
+    queryKey: ["report-source", report.id],
+    queryFn: () => api.getReportSource(report.id),
+    enabled: open,
+  });
+  const value = draft ?? source.data?.html ?? "";
+  const dirty = draft !== null && draft !== source.data?.html;
+
+  const save = async () => {
+    if (!value.trim()) return;
+    setBusy(true);
+    setRejectedFindings(null);
+    try {
+      const result = await api.updateReportContent(report.id, value);
+      invalidate(report.id);
+      void queryClient.invalidateQueries({ queryKey: ["report-source", report.id] });
+      if (result.report.status === "rejected") {
+        // 編集内容は残したまま検知内容を表示（修正して再保存できる）
+        setRejectedFindings(result.report.findings);
+      } else {
+        toast.push(
+          "success",
+          result.report.status === "published"
+            ? "保存しました。公開中の内容を更新しました"
+            : "保存しました（非公開のまま）",
+        );
+        if (result.report.verdict === "warn") {
+          toast.push("info", "スキャンで注意項目が見つかりました。内容を確認してください");
+        }
+        setDraft(null);
+        onClose();
+      }
+    } catch (err) {
+      toast.push("danger", isApiError(err) ? err.message : "エラーが発生しました。時間をおいて再試行してください");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      title={`「${report.title}」の HTML を編集`}
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+      closeOnOverlay={false}
+      wide
+      footer={
+        <>
+          <span className="hrb-editor-note">保存すると再スキャンが実行されます</span>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            キャンセル
+          </Button>
+          <Button loading={busy} disabled={!value.trim() || source.isLoading || !dirty} onClick={() => void save()}>
+            保存
+          </Button>
+        </>
+      }
+    >
+      {source.isLoading && <p className="hrb-loading">読み込み中…</p>}
+      {source.isError && (
+        <p className="hrb-editor-error">
+          ソースを取得できませんでした。
+          {isApiError(source.error) ? ` ${source.error.message}` : ""}
+        </p>
+      )}
+      {source.isSuccess && (
+        <>
+          <textarea
+            className="hrb-input hrb-editor"
+            value={value}
+            spellCheck={false}
+            onChange={(e) => setDraft(e.target.value)}
+            aria-label="HTML ソース"
+          />
+          {rejectedFindings && (
+            <div className="hrb-editor-rejected" role="alert">
+              <strong>セキュリティスキャンで拒否されました。</strong>
+              修正して保存し直すまでレポートは非公開の「拒否」状態になります
+              <ul className="hrb-findings">
+                {rejectedFindings.map((f, i) => (
+                  <li key={i} className="hrb-findings__item">
+                    {f.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
     </Modal>
   );
 }
@@ -199,7 +313,7 @@ export function OverwriteReportModal({
           : { type: "COMPLETE", report: completed.report },
       );
       invalidate(report.id);
-      if (completed.report.status === "published") {
+      if (completed.report.status !== "rejected") {
         toast.push("success", "レポートを上書きしました");
       }
     } catch (err) {
@@ -214,29 +328,32 @@ export function OverwriteReportModal({
 
   const resultContent =
     state.phase === "done" ? (
-      state.report.status === "pending_review" ? (
-        <div className="hrb-upload-result hrb-upload-result--warn">
-          <div className="hrb-upload-result__icon" aria-hidden="true">
-            <Icon name="clock" size={28} />
-          </div>
-          <h2 className="hrb-upload-result__title hrb-upload-result__title--pending">
-            アップロードを受け付けました — 管理者の承認待ちです
-          </h2>
-          <div className="hrb-upload-result__actions">
-            <Button onClick={close}>閉じる</Button>
-          </div>
+      <div className="hrb-upload-result">
+        <div className="hrb-upload-result__icon" aria-hidden="true">
+          <Icon name="check-circle" size={28} />
         </div>
-      ) : (
-        <div className="hrb-upload-result">
-          <div className="hrb-upload-result__icon" aria-hidden="true">
-            <Icon name="check-circle" size={28} />
+        <h2 className="hrb-upload-result__title">上書きが完了しました</h2>
+        <p className="hrb-upload-result__body">
+          {state.report.status === "published"
+            ? "公開中の内容を新しいファイルで更新しました"
+            : "このレポートは非公開のままです。公開トグルでいつでも公開できます"}
+        </p>
+        {state.report.verdict === "warn" && (
+          <div className="hrb-upload-result__findings">
+            <p className="hrb-upload-result__note">スキャンで注意項目が見つかりました:</p>
+            <ul className="hrb-findings">
+              {state.report.findings.map((f, i) => (
+                <li key={i} className="hrb-findings__item">
+                  {f.message}
+                </li>
+              ))}
+            </ul>
           </div>
-          <h2 className="hrb-upload-result__title">上書きが完了しました</h2>
-          <div className="hrb-upload-result__actions">
-            <Button onClick={close}>閉じる</Button>
-          </div>
+        )}
+        <div className="hrb-upload-result__actions">
+          <Button onClick={close}>閉じる</Button>
         </div>
-      )
+      </div>
     ) : state.phase === "rejected" ? (
       <div className="hrb-upload-result hrb-upload-result--rejected">
         <div className="hrb-upload-result__icon" aria-hidden="true">

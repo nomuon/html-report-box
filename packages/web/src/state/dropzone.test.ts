@@ -56,13 +56,13 @@ describe("dropzoneReducer", () => {
     expect(run([{ type: "DRAG_ENTER" }], uploading)).toEqual(uploading);
   });
 
-  test("verdict=warn (pending_review) still lands on done — 承認待ち表示は表示側で分岐", () => {
-    const s = run([{ type: "COMPLETE", report: report("pending_review") }], {
+  test("非公開のまま完了（url なし）でも done に遷移する", () => {
+    const s = run([{ type: "COMPLETE", report: report("private") }], {
       phase: "scanning",
       file,
     });
     expect(s.phase).toBe("done");
-    if (s.phase === "done") expect(s.report.status).toBe("pending_review");
+    if (s.phase === "done") expect(s.report.status).toBe("private");
   });
 
   test("verdict=block (rejected) lands on rejected with findings", () => {

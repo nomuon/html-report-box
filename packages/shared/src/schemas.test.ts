@@ -62,9 +62,9 @@ describe("ReportMetaSchema", () => {
     expect(parsed.description).toBe("");
   });
 
-  test("sha256/sizeBytes/verdict are optional (processing state)", () => {
+  test("sha256/sizeBytes/verdict are optional (pre-upload private state)", () => {
     const { sha256: _s, sizeBytes: _b, verdict: _v, ...rest } = validMeta;
-    expect(ReportMetaSchema.parse({ ...rest, status: "processing" }).verdict).toBeUndefined();
+    expect(ReportMetaSchema.parse({ ...rest, status: "private" }).verdict).toBeUndefined();
   });
 
   test("rejects unknown status", () => {
@@ -80,8 +80,8 @@ describe("ReportMetaSchema", () => {
     expect(ReportMetaSchema.safeParse({ ...validMeta, title: "  " }).success).toBe(false);
   });
 
-  test("all five statuses are accepted", () => {
-    for (const status of ["processing", "published", "rejected", "pending_review", "takedown"]) {
+  test("all four statuses are accepted", () => {
+    for (const status of ["private", "published", "rejected", "takedown"]) {
       expect(ReportMetaSchema.safeParse({ ...validMeta, status }).success).toBe(true);
     }
   });
@@ -186,8 +186,8 @@ describe("API request schemas", () => {
 
   test("AdminListReportsQuery accepts status filter", () => {
     expect(
-      AdminListReportsQuerySchema.parse({ status: "pending_review", limit: "5" }),
-    ).toEqual({ status: "pending_review", limit: 5 });
+      AdminListReportsQuerySchema.parse({ status: "private", limit: "5" }),
+    ).toEqual({ status: "private", limit: 5 });
     expect(AdminListReportsQuerySchema.safeParse({ status: "nope" }).success).toBe(false);
   });
 });

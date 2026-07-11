@@ -23,13 +23,14 @@ let mcpCtx: McpContext;
 let app: Hono;
 let salesId: string; // published first
 let auditId: string; // published second (more recent)
-let draftId: string; // created but never completed → processing
+let draftId: string; // created but never completed → private (no content)
 
 async function publish(owner: string, title: string, body: string): Promise<string> {
   const user = getDevUser(owner);
   const { report, upload } = await ctx.service.create(user, { title, kind: "html" });
   await ctx.storage.putStagingObject(upload.key, new TextEncoder().encode(page(title, body)));
-  const done = await ctx.service.complete(user, report.id, upload.key);
+  await ctx.service.complete(user, report.id, upload.key);
+  const done = await ctx.service.publish(user, report.id);
   expect(done.report.status).toBe("published");
   return report.id;
 }

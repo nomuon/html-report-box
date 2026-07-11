@@ -40,15 +40,24 @@ AWS サーバーレス構成（S3 + CloudFront + API Gateway + Lambda + DynamoDB
 
 ### アップロード〜公開フロー
 
+公開/非公開はオーナー自身が切り替える（admin の事前承認は廃止）。非公開は「削除」ではなく
+「存在するが未公開」のステータスで、オーナーと admin だけが内容（非公開プレビュー / ソース）を閲覧できる。
+
 ```
-POST /api/reports（META 作成 status=processing + presigned 発行）
+POST /api/reports（META 作成 status=private + presigned 発行）
   → S3 staging へ直 PUT
   → POST /api/reports/:id/complete
       検証（サイズ/キー） → メタ・本文抽出（parse5） → SecurityScanner.scan()
-        pass  → content バケットへコピー → 転置インデックス → published
-        warn  → pending_review（staging に留置、admin の承認/却下待ち）
-        block → rejected（検体は staging に30日保持、公開済みなら取り下げ）
+        pass/warn → sources/<id>/current に原本保存 → private（公開中の上書きは公開のまま再公開）
+                    warn の findings はオーナーに提示（公開判断はオーナー）
+        block     → rejected（検体は staging に30日保持、公開済みなら取り下げ）
+  → POST /api/reports/:id/publish    原本から展開 → content バケットへコピー → 転置インデックス → published
+  → POST /api/reports/:id/unpublish  content 削除 + インデックス除去 → private（原本は保持）
 ```
+
+- `GET /api/reports/:id/source`（オーナー/admin）… 非公開プレビューと HTML 直接編集用のソース取得
+- `PUT /api/reports/:id/content`（オーナー/admin、html のみ）… HTML 直接編集。上書きアップロード同様フルスキャンを再実行
+- コンテンツオリジン（`/r/<id>/`）に載るのは published のみ。「content バケットに存在する = 公開中」の不変条件は維持
 
 ## パッケージ構成（Bun workspaces モノレポ）
 
@@ -94,7 +103,7 @@ bun scripts/smoke.ts                 # E2E（要: bun run seed + bun run dev 起
 bun run --filter @hrb/infra synth    # Lambda バンドル + cdk synth
 ```
 
-`scripts/smoke.ts` は実サーバーに対する E2E で、アップロード（HTML/zip）→ 配信 → 悪性検体の block（zip-slip / eval+atob / フィッシングフォーム）→ warn → admin 承認 → 上書き（version+1・旧インデックス掃除）→ 通報 + レート制限 → テイクダウン → 認可 → MCP 3 ツール → 削除、までを検証する。
+`scripts/smoke.ts` は実サーバーに対する E2E で、アップロード（HTML/zip → private → 公開）→ 配信 → 悪性検体の block（zip-slip / eval+atob / フィッシングフォーム）→ warn（private + オーナー自身の公開）→ 非公開化/再公開 + ソース取得 + HTML 直接編集 → 上書き（version+1・旧インデックス掃除）→ 通報 + レート制限 + admin 通報一覧/解決 → テイクダウン → 認可 → MCP 3 ツール → 削除、までを検証する。
 
 ## MCP 接続
 
@@ -121,12 +130,12 @@ claude mcp add --transport http hrb http://localhost:3000/mcp
    - コンテンツ側 CSP（CloudFront で静的付与）: `connect-src 'self'` / `form-action 'self'` / `frame-src 'none'` 等。script/style は self + 主要 CDN（jsdelivr/unpkg/cdnjs/tailwind）のみ許可
 2. **アップロード時静的スキャン**（同期、pass / warn / block）
    - block: 資格情報フィッシングフォーム（password + 外部 action / ブランド語彙）、外部への即時 meta refresh、実行系拡張子リンク、eval+atob 等のデコード実行連鎖、大型 data:URI、hidden iframe、マイナーシグネチャ、SVG 内スクリプト、MIME 不一致、既知悪性ドメイン
-   - warn（admin 承認待ち）: 外部 action フォーム、password 入力の存在、JS 外部リダイレクト、難読化スコア閾値超え、アローリスト外 script src
+   - warn（オーナーに注意提示。公開はオーナー判断）: 外部 action フォーム、password 入力の存在、JS 外部リダイレクト、難読化スコア閾値超え、アローリスト外 script src
    - zip: yauzl ストリーミング検査。zip-slip / symlink / 暗号化エントリ / zip bomb（実測 100MB・200 エントリ・圧縮率 100:1）/ ネスト zip 拒否、拡張子アローリスト、root `index.html` 必須。html/js/svg エントリは再帰スキャン
    - サイズ上限: HTML 5MB / zip 20MB（presigned `content-length-range` と Lambda 内で二重強制）
 3. **追跡と即応**
    - アップロードは Google ログイン必須。META に sha256 / sourceIp / userAgent / verdict / findings を監査記録
-   - 通報ボタン（無認証可・IP レート制限 5 件/10 分）→ admin が確認、テイクダウン API（非公開化 + コンテンツ削除 + invalidation、META は監査用に保持）
+   - 通報ボタン（無認証可・IP レート制限 5 件/10 分）→ admin が管理画面の通報一覧で確認し、テイクダウン（強制非公開 + 公開コンテンツ削除 + invalidation、META は監査用に保持）または通報解決
    - ユーザーあたり 30 アップロード/日。上書きは必ずフルスキャン再実行
    - 全体を社内 NW に閉域（WAF IP アロウリスト、デフォルト Block）
 

@@ -10,9 +10,11 @@ export interface ModalProps {
   footer?: ReactNode;
   /** destructive 確認中はオーバーレイクリックで閉じない */
   closeOnOverlay?: boolean;
+  /** エディタなど広い作業領域が必要なモーダル */
+  wide?: boolean;
 }
 
-export function Modal({ open, title, onClose, children, footer, closeOnOverlay = true }: ModalProps) {
+export function Modal({ open, title, onClose, children, footer, closeOnOverlay = true, wide = false }: ModalProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,7 +39,13 @@ export function Modal({ open, title, onClose, children, footer, closeOnOverlay =
         if (closeOnOverlay && e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="hrb-modal" role="dialog" aria-modal="true" aria-label={title} ref={bodyRef}>
+      <div
+        className={`hrb-modal ${wide ? "hrb-modal--wide" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        ref={bodyRef}
+      >
         <div className="hrb-modal__header">
           <h2 className="hrb-modal__title">{title}</h2>
           <button type="button" className="hrb-icon-btn hrb-modal__close" aria-label="閉じる" onClick={onClose}>

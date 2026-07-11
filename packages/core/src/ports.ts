@@ -6,6 +6,7 @@ import type {
   AdminUser,
   AuthConfig,
   PresignedUpload,
+  ReportFlag,
   ReportKind,
   ReportMeta,
   ReportStatus,
@@ -47,11 +48,7 @@ export interface Page<T> {
 
 // ---- Repository ----
 
-export interface ReportFlag {
-  reason: string;
-  createdAt: string;
-  sourceIp?: string;
-}
+export type { ReportFlag };
 
 export interface ReportRepository {
   /** Throws DomainError("conflict") when the id already exists. */
@@ -78,6 +75,10 @@ export interface ReportRepository {
   incrementDailyUploads(ownerSub: string, dateKey: string): Promise<number>;
   addFlag(id: string, flag: ReportFlag): Promise<void>;
   listFlags(id: string): Promise<ReportFlag[]>;
+  /** Every report id that currently has at least one flag (admin 通報一覧). */
+  listFlagged(): Promise<Array<{ id: string; flags: ReportFlag[] }>>;
+  /** Resolve a report's flags (admin marks the通報 handled). */
+  clearFlags(id: string): Promise<void>;
 }
 
 // ---- Search index ----

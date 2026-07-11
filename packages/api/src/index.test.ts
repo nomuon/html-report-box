@@ -77,7 +77,7 @@ async function call(
   return { status: res.status, json };
 }
 
-/** create → stage bytes → complete. Returns ids and both responses. */
+/** create → stage bytes → complete. Returns ids and both responses (report ends private). */
 async function upload(
   env: ReturnType<typeof makeEnv>,
   user: string,
@@ -97,6 +97,19 @@ async function upload(
     body: { key },
   });
   return { created, completed, id, key };
+}
+
+/** upload + owner publish（公開まで通す） */
+async function uploadPublished(
+  env: ReturnType<typeof makeEnv>,
+  user: string,
+  title: string,
+  html?: string,
+) {
+  const result = await upload(env, user, title, html);
+  const published = await call(env.app, "POST", `/reports/${result.id}/publish`, { user });
+  expect(published.status).toBe(200);
+  return { ...result, published };
 }
 
 // =====================
@@ -184,15 +197,26 @@ test("unknown route → 404 with error envelope", async () => {
 });
 
 // =====================
-// Lifecycle: create → complete(pass) → visible → authz on delete
+// Lifecycle: create → complete(pass, private) → publish → visible → authz on delete
 // =====================
 
-test("alice uploads (pass) → published; bob can read but not delete; admin can delete", async () => {
+test("alice uploads (pass) → private; publish makes it public; bob can read but not delete", async () => {
   const env = makeEnv();
   const { completed, id } = await upload(env, "alice", "Quarterly Numbers");
   expect(completed.status).toBe(200);
-  expect(completed.json.report.status).toBe("published");
-  expect(completed.json.url).toBe(`${BASE}/r/${id}/`);
+  expect(completed.json.report.status).toBe("private");
+  expect(completed.json.url).toBeUndefined();
+
+  // Private: invisible to everyone but the owner/admin.
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(0);
+  expect((await call(env.app, "GET", `/reports/${id}`, { user: "bob" })).status).toBe(404);
+
+  // bob cannot publish alice's report; alice can.
+  expect((await call(env.app, "POST", `/reports/${id}/publish`, { user: "bob" })).status).toBe(403);
+  const published = await call(env.app, "POST", `/reports/${id}/publish`, { user: "alice" });
+  expect(published.status).toBe(200);
+  expect(published.json.report.status).toBe("published");
+  expect(published.json.url).toBe(`${BASE}/r/${id}/`);
 
   // Public list (unauthenticated) sees it, without private fields.
   const list = await call(env.app, "GET", "/reports");
@@ -254,13 +278,13 @@ test("non-published report: owner and admin see it, others get 404", async () =>
 
   const asAlice = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
   expect(asAlice.status).toBe(200);
-  expect(asAlice.json.report.status).toBe("processing");
+  expect(asAlice.json.report.status).toBe("private");
   expect(asAlice.json.url).toBeUndefined();
 
   const asAdmin = await call(env.app, "GET", `/reports/${id}`, { user: "admin" });
   expect(asAdmin.status).toBe(200);
 
-  // Owner sees it in /me/reports even while processing.
+  // Owner sees it in /me/reports while private.
   const mine = await call(env.app, "GET", "/me/reports", { user: "alice" });
   expect(mine.status).toBe(200);
   expect(mine.json.reports.map((r: any) => r.id)).toContain(id);
@@ -297,9 +321,9 @@ test("complete before the file is uploaded → 400 upload_incomplete", async () 
 // Overwrite
 // =====================
 
-test("overwrite via upload-url bumps version", async () => {
+test("overwrite via upload-url bumps version and keeps a published report published", async () => {
   const env = makeEnv();
-  const { id } = await upload(env, "alice", "Versioned");
+  const { id } = await uploadPublished(env, "alice", "Versioned");
 
   const urlRes = await call(env.app, "POST", `/reports/${id}/upload-url`, {
     user: "alice",
@@ -349,7 +373,7 @@ test("daily upload quota → 429 rate_limited", async () => {
 
 test("flag: works unauthenticated on published reports, rate limited per IP, admin can list", async () => {
   const env = makeEnv();
-  const { id } = await upload(env, "alice", "Flag Target");
+  const { id } = await uploadPublished(env, "alice", "Flag Target");
 
   const ok = await call(env.app, "POST", `/reports/${id}/flag`, {
     body: { reason: "looks suspicious" },
@@ -392,7 +416,7 @@ test("flag: works unauthenticated on published reports, rate limited per IP, adm
 
 test("AZ-1: spoofing the leftmost X-Forwarded-For entry cannot bypass the flag limiter", async () => {
   const env = makeEnv();
-  const { id } = await upload(env, "alice", "XFF Spoof Target");
+  const { id } = await uploadPublished(env, "alice", "XFF Spoof Target");
 
   // CloudFront/API Gateway append the real viewer IP, so the trusted client IP
   // is the RIGHTMOST entry. An attacker rotating the leftmost value on each
@@ -431,65 +455,108 @@ test("flag on a non-published report → 404", async () => {
 });
 
 // =====================
-// Scanner verdicts: warn → pending_review → admin approve / reject
+// Publish / unpublish (owner-controlled visibility)
 // =====================
 
-test("warn verdict → pending_review; admin approve publishes", async () => {
+test("unpublish hides a published report; owner keeps access and can republish", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Toggle Target");
+
+  // bob cannot unpublish.
+  expect((await call(env.app, "POST", `/reports/${id}/unpublish`, { user: "bob" })).status).toBe(403);
+
+  const hidden = await call(env.app, "POST", `/reports/${id}/unpublish`, { user: "alice" });
+  expect(hidden.status).toBe(200);
+  expect(hidden.json.report.status).toBe("private");
+
+  expect((await call(env.app, "GET", `/reports/${id}`)).status).toBe(404);
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(0);
+
+  // Owner still reads it and its source; others cannot.
+  const owner = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(owner.status).toBe(200);
+  const source = await call(env.app, "GET", `/reports/${id}/source`, { user: "alice" });
+  expect(source.status).toBe(200);
+  expect(source.json.kind).toBe("html");
+  expect(source.json.html).toContain("Toggle Target");
+  expect((await call(env.app, "GET", `/reports/${id}/source`, { user: "bob" })).status).toBe(403);
+  expect((await call(env.app, "GET", `/reports/${id}/source`)).status).toBe(401);
+
+  // Republish restores the public URL.
+  const again = await call(env.app, "POST", `/reports/${id}/publish`, { user: "alice" });
+  expect(again.status).toBe(200);
+  expect(again.json.url).toBe(`${BASE}/r/${id}/`);
+});
+
+// =====================
+// Direct HTML edit
+// =====================
+
+test("PUT /reports/:id/content re-scans and updates in place", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Editable");
+
+  const edited = await call(env.app, "PUT", `/reports/${id}/content`, {
+    user: "alice",
+    body: { html: "<html><head><title>Editable v2</title></head><body>edited body</body></html>" },
+  });
+  expect(edited.status).toBe(200);
+  expect(edited.json.report.version).toBe(2);
+  expect(edited.json.report.status).toBe("published");
+  expect(edited.json.url).toBe(`${BASE}/r/${id}/`);
+
+  const source = await call(env.app, "GET", `/reports/${id}/source`, { user: "alice" });
+  expect(source.json.html).toContain("edited body");
+
+  // Non-owner cannot edit; empty body fails validation.
+  expect(
+    (await call(env.app, "PUT", `/reports/${id}/content`, { user: "bob", body: { html: "<p>x</p>" } }))
+      .status,
+  ).toBe(403);
+  expect(
+    (await call(env.app, "PUT", `/reports/${id}/content`, { user: "alice", body: { html: "" } }))
+      .status,
+  ).toBe(400);
+
+  // Blocked edit rejects the report.
+  env.scanner.next = {
+    verdict: "block",
+    findings: [{ ruleId: "eval-atob", severity: "block", message: "decode-and-execute chain" }],
+  };
+  const blocked = await call(env.app, "PUT", `/reports/${id}/content`, {
+    user: "alice",
+    body: { html: "<html><body>bad</body></html>" },
+  });
+  expect(blocked.status).toBe(200);
+  expect(blocked.json.report.status).toBe("rejected");
+  expect((await call(env.app, "GET", `/reports/${id}`)).status).toBe(404);
+});
+
+test("warn verdict → private with findings; owner can publish without admin approval", async () => {
   const env = makeEnv();
   env.scanner.next = {
     verdict: "warn",
     findings: [{ ruleId: "external-form", severity: "warn", message: "form posts externally" }],
   };
-  const { completed, id } = await upload(env, "alice", "Needs Review");
+  const { completed, id } = await upload(env, "alice", "Warned Report");
   expect(completed.status).toBe(200);
-  expect(completed.json.report.status).toBe("pending_review");
+  expect(completed.json.report.status).toBe("private");
   expect(completed.json.url).toBeUndefined();
   expect(completed.json.report.findings).toHaveLength(1);
 
-  // Not publicly visible while pending.
+  // Not publicly visible while private.
   expect((await call(env.app, "GET", `/reports/${id}`)).status).toBe(404);
   expect((await call(env.app, "GET", `/reports/${id}`, { user: "bob" })).status).toBe(404);
 
-  // Admin sees it in the pending queue.
-  const pending = await call(env.app, "GET", "/admin/reports?status=pending_review", {
-    user: "admin",
-  });
-  expect(pending.status).toBe(200);
-  expect(pending.json.reports.map((r: any) => r.id)).toContain(id);
-
-  // Non-admin cannot approve.
-  expect((await call(env.app, "POST", `/reports/${id}/complete`, { user: "bob", body: { key: "x" } })).status).toBe(403);
-  expect((await call(env.app, "POST", `/admin/reports/${id}/approve`, { user: "alice" })).status).toBe(403);
-
-  const approved = await call(env.app, "POST", `/admin/reports/${id}/approve`, { user: "admin" });
-  expect(approved.status).toBe(200);
-  expect(approved.json.report.status).toBe("published");
+  // Owner publishes it themselves — no admin gate.
+  const published = await call(env.app, "POST", `/reports/${id}/publish`, { user: "alice" });
+  expect(published.status).toBe(200);
+  expect(published.json.report.status).toBe("published");
+  expect(published.json.report.verdict).toBe("warn");
 
   const pub = await call(env.app, "GET", `/reports/${id}`);
   expect(pub.status).toBe(200);
   expect(pub.json.url).toBe(`${BASE}/r/${id}/`);
-
-  // Approving twice → 409.
-  const again = await call(env.app, "POST", `/admin/reports/${id}/approve`, { user: "admin" });
-  expect(again.status).toBe(409);
-});
-
-test("warn verdict → admin reject leaves the report rejected", async () => {
-  const env = makeEnv();
-  env.scanner.next = {
-    verdict: "warn",
-    findings: [{ ruleId: "password-input", severity: "warn", message: "password input present" }],
-  };
-  const { id } = await upload(env, "alice", "Rejected After Review");
-
-  const rejected = await call(env.app, "POST", `/admin/reports/${id}/reject`, { user: "admin" });
-  expect(rejected.status).toBe(200);
-  expect(rejected.json.report.status).toBe("rejected");
-
-  expect((await call(env.app, "GET", `/reports/${id}`)).status).toBe(404);
-  const owner = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
-  expect(owner.status).toBe(200);
-  expect(owner.json.report.status).toBe("rejected");
 });
 
 test("block verdict → rejected immediately, findings visible to owner", async () => {
@@ -523,7 +590,7 @@ test("block verdict → rejected immediately, findings visible to owner", async 
 
 test("admin takedown unpublishes and blocks owner re-upload", async () => {
   const env = makeEnv();
-  const { id } = await upload(env, "alice", "Taken Down");
+  const { id } = await uploadPublished(env, "alice", "Taken Down");
 
   const takedown = await call(env.app, "POST", `/admin/reports/${id}/takedown`, { user: "admin" });
   expect(takedown.status).toBe(200);
@@ -538,6 +605,35 @@ test("admin takedown unpublishes and blocks owner re-upload", async () => {
     body: { kind: "html" },
   });
   expect(ownerRetry.status).toBe(403);
+  // 再公開もソース閲覧も不可
+  expect((await call(env.app, "POST", `/reports/${id}/publish`, { user: "alice" })).status).toBe(403);
+  expect((await call(env.app, "GET", `/reports/${id}/source`, { user: "alice" })).status).toBe(403);
+});
+
+// =====================
+// Admin 通報一覧
+// =====================
+
+test("GET /admin/flagged lists flagged reports; DELETE .../flags resolves them", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Flagged Once");
+  await call(env.app, "POST", `/reports/${id}/flag`, {
+    body: { reason: "見た目が怪しい" },
+    ip: "10.1.1.1",
+  });
+
+  expect((await call(env.app, "GET", "/admin/flagged", { user: "alice" })).status).toBe(403);
+  const flagged = await call(env.app, "GET", "/admin/flagged", { user: "admin" });
+  expect(flagged.status).toBe(200);
+  expect(flagged.json.items).toHaveLength(1);
+  expect(flagged.json.items[0].report.id).toBe(id);
+  expect(flagged.json.items[0].flags[0].reason).toBe("見た目が怪しい");
+
+  expect((await call(env.app, "DELETE", `/admin/reports/${id}/flags`, { user: "alice" })).status).toBe(403);
+  const cleared = await call(env.app, "DELETE", `/admin/reports/${id}/flags`, { user: "admin" });
+  expect(cleared.status).toBe(200);
+  expect(cleared.json.ok).toBe(true);
+  expect((await call(env.app, "GET", "/admin/flagged", { user: "admin" })).json.items).toHaveLength(0);
 });
 
 // =====================

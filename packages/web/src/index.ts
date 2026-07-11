@@ -7,7 +7,7 @@ export const PACKAGE_NAME = "@hrb/web";
 export { App } from "./App.tsx";
 
 export { ApiClient, ApiError, isApiError } from "./lib/api.ts";
-export type { ApiClientOptions, ReportFlagView } from "./lib/api.ts";
+export type { ApiClientOptions } from "./lib/api.ts";
 export {
   CognitoAuthProvider,
   DEV_USER_HEADER,

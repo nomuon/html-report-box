@@ -418,4 +418,55 @@ export class DynamoReportRepository implements ReportRepository {
     } while (startKey);
     return flags;
   }
+
+  /**
+   * Flag items live under their report partition, which no GSI covers — a
+   * filtered Scan is acceptable at admin volumes (flags are rare).
+   */
+  async listFlagged(): Promise<Array<{ id: string; flags: ReportFlag[] }>> {
+    const byId = new Map<string, ReportFlag[]>();
+    let startKey: Record<string, unknown> | undefined;
+    do {
+      const res = await this.client.send(
+        new ScanCommand({
+          TableName: this.tableName,
+          FilterExpression: "begins_with(sk, :flag)",
+          ExpressionAttributeValues: { ":flag": FLAG_SK_PREFIX },
+          ...(startKey ? { ExclusiveStartKey: startKey } : {}),
+        }),
+      );
+      for (const item of (res?.Items ?? []) as Array<Record<string, unknown>>) {
+        const { pk, sk: _sk, ...rest } = item;
+        const id = String(pk).slice("R#".length);
+        const list = byId.get(id) ?? [];
+        list.push(rest as unknown as ReportFlag);
+        byId.set(id, list);
+      }
+      startKey = res?.LastEvaluatedKey as Record<string, unknown> | undefined;
+    } while (startKey);
+    return [...byId.entries()].map(([id, flags]) => ({ id, flags }));
+  }
+
+  async clearFlags(id: string): Promise<void> {
+    const requests: WriteRequest[] = [];
+    let startKey: Record<string, unknown> | undefined;
+    do {
+      const res = await this.client.send(
+        new QueryCommand({
+          TableName: this.tableName,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :flag)",
+          ExpressionAttributeValues: { ":pk": reportPk(id), ":flag": FLAG_SK_PREFIX },
+          ProjectionExpression: "pk, sk",
+          ...(startKey ? { ExclusiveStartKey: startKey } : {}),
+        }),
+      );
+      for (const item of (res?.Items ?? []) as Array<Record<string, unknown>>) {
+        requests.push({ DeleteRequest: { Key: { pk: item.pk, sk: item.sk } } });
+      }
+      startKey = res?.LastEvaluatedKey as Record<string, unknown> | undefined;
+    } while (startKey);
+    if (requests.length > 0) {
+      await batchWriteAll(this.client, this.tableName, requests);
+    }
+  }
 }

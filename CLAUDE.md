@@ -49,7 +49,7 @@ Bun workspaces モノレポ。依存方向: `web→shared` / `api→core→share
 - **Ports & Adapters**: `core/src/ports.ts` のインターフェース（ReportRepository / SearchIndex / ObjectStorage / AuthVerifier / …）に対し、`core/src/local/`（Bun・JSON 永続化）と `core/src/aws/`（DynamoDB・S3・Cognito）の 2 実装がある。同一の Hono アプリがローカル Bun サーバーと Lambda（Node 22）の両方で動く。
 - **ランタイム互換の境界**: Lambda に載るコード（shared / core / scanner / api / mcp）は **Node 22 互換必須**。Bun 専用 API（`Bun.file` 等）は `core/src/local/`・`api/src/local/`・`packages/web`・スクリプト類に限定すること。
 - **オリジン分離が防御の核**: アップロードされた HTML は認証トークンを持つアプリとは別の CloudFront ディストリビューション・別オリジンから cookieless で配信。共有 URL はアプリのシェルページ `/reports/:id` が正で、sandbox 付き iframe でコンテンツを埋め込む。
-- **アップロードフロー**: `POST /api/reports`（META 作成 + presigned 発行）→ staging へ直 PUT → `POST /api/reports/:id/complete` で検証・本文抽出・スキャン。pass → content へコピー + 転置インデックス → published、warn → pending_review（admin 承認待ち）、block → rejected。上書きは必ずフルスキャン再実行。
+- **アップロードフロー / 可視性**: `POST /api/reports`（META 作成 status=private + presigned 発行）→ staging へ直 PUT → `POST /api/reports/:id/complete` で検証・本文抽出・スキャン。pass/warn → 原本を `sources/<id>/current` に保存して private（公開中の上書きは公開のまま）、block → rejected。公開/非公開はオーナー自身が `publish` / `unpublish` で切替（admin 事前承認なし）。非公開でもオーナー/admin は `GET /reports/:id/source` で内容閲覧（非公開プレビュー）、`PUT /reports/:id/content` で HTML 直接編集（フルスキャン再実行）。ステータスは private / published / rejected / takedown の4種。admin のモデレーションは通報（flag）一覧 + テイクダウン + 通報解決。上書き・編集は必ずフルスキャン再実行。
 - **検索は DynamoDB 転置インデックス**（OpenSearch 不使用）。タイトル+8 / 説明+4 / 本文+1 の重み付け。
 - エラーは常に `{error:{code,message}}` 形式。`DomainError.httpStatus` がステータスコードを決める。ルート保護は宣言的（public / `requireAuth` / `requireAdmin`）。
 

@@ -3,7 +3,7 @@
  *
  * Visual states (DESIGN.md §4.1):
  *   idle → dragover → (drop) → selected(メタ入力) → uploading(%) →
- *   scanning → done | rejected      (verdict=warn → done with 承認待ち表示)
+ *   scanning → done | rejected      (done = private/published、warn は注意表示)
  */
 import type { OwnedReport, ReportKind, ScanFinding } from "@hrb/shared";
 
@@ -67,8 +67,8 @@ export function dropzoneReducer(state: DropzoneState, ev: DropzoneEvent): Dropzo
       if (ev.report.status === "rejected") {
         return { phase: "rejected", findings: ev.report.findings };
       }
-      // published (pass) と pending_review (warn) はどちらも done 表示
-      // （warn は done コンポーネント側で承認待ち文言に切り替える）。
+      // rejected 以外（private / published、verdict pass/warn）は done 表示
+      // （warn の注意項目は done コンポーネント側で表示する）。
       return ev.url !== undefined
         ? { phase: "done", report: ev.report, url: ev.url }
         : { phase: "done", report: ev.report };

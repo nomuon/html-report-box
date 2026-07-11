@@ -1,4 +1,4 @@
-/** 画面④: マイレポート (`/mine`) — テーブル固定 + 編集/上書き/削除 */
+/** 画面④: マイレポート (`/mine`) — 公開トグル + HTML編集/上書き/メタ編集/削除 */
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useInfiniteQuery } from "@tanstack/react-query";
@@ -8,14 +8,17 @@ import { Button } from "../components/Button.tsx";
 import { StatusChip } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
+import { PublishToggle } from "../components/PublishToggle.tsx";
 import {
   DeleteReportModal,
+  EditHtmlModal,
   EditReportModal,
   OverwriteReportModal,
 } from "../components/report-modals.tsx";
 import { formatDateTime } from "../lib/format.ts";
 
 type ModalState =
+  | { type: "edit-html"; report: OwnedReport }
   | { type: "edit"; report: OwnedReport }
   | { type: "overwrite"; report: OwnedReport }
   | { type: "delete"; report: OwnedReport }
@@ -67,7 +70,7 @@ export function MinePage() {
             <thead>
               <tr>
                 <th>タイトル</th>
-                <th>ステータス</th>
+                <th>公開状態</th>
                 <th>更新日時</th>
                 <th>操作</th>
               </tr>
@@ -82,20 +85,24 @@ export function MinePage() {
                   </td>
                   <td>
                     <span className="hrb-status-cell">
-                      <StatusChip status={r.status} />
-                      {r.status === "pending_review" && (
-                        <span
-                          className="hrb-tip"
-                          data-tip="管理者の承認待ちです。承認されると公開されます"
-                          tabIndex={0}
-                        >
-                          <Icon name="info" size={15} />
-                        </span>
+                      {r.status === "published" || r.status === "private" ? (
+                        <PublishToggle report={r} />
+                      ) : (
+                        <StatusChip status={r.status} />
                       )}
                       {r.status === "rejected" && r.findings.length > 0 && (
                         <span
                           className="hrb-tip"
                           data-tip={r.findings.map((f) => f.message).join(" / ")}
+                          tabIndex={0}
+                        >
+                          <Icon name="info" size={15} />
+                        </span>
+                      )}
+                      {r.status !== "rejected" && r.verdict === "warn" && (
+                        <span
+                          className="hrb-tip"
+                          data-tip={`スキャン注意項目: ${r.findings.map((f) => f.message).join(" / ")}`}
                           tabIndex={0}
                         >
                           <Icon name="info" size={15} />
@@ -109,11 +116,12 @@ export function MinePage() {
                       <button
                         type="button"
                         className="hrb-icon-btn hrb-tip"
-                        data-tip="メタ編集"
-                        aria-label="メタ編集"
-                        onClick={() => setModal({ type: "edit", report: r })}
+                        data-tip={r.kind === "html" ? "HTMLを編集" : "ZIPは直接編集できません"}
+                        aria-label="HTMLを編集"
+                        disabled={r.kind !== "html"}
+                        onClick={() => setModal({ type: "edit-html", report: r })}
                       >
-                        <Icon name="pencil" size={16} />
+                        <Icon name="code" size={16} />
                       </button>
                       <button
                         type="button"
@@ -122,7 +130,16 @@ export function MinePage() {
                         aria-label="上書きアップロード"
                         onClick={() => setModal({ type: "overwrite", report: r })}
                       >
-                        <Icon name="refresh" size={16} />
+                        <Icon name="upload" size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="hrb-icon-btn hrb-tip"
+                        data-tip="タイトル・説明を編集"
+                        aria-label="タイトル・説明を編集"
+                        onClick={() => setModal({ type: "edit", report: r })}
+                      >
+                        <Icon name="pencil" size={16} />
                       </button>
                       <button
                         type="button"
@@ -154,6 +171,14 @@ export function MinePage() {
         </div>
       )}
 
+      {modal?.type === "edit-html" && (
+        <EditHtmlModal
+          key={modal.report.id}
+          report={modal.report}
+          open
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal?.type === "edit" && (
         <EditReportModal
           key={modal.report.id}

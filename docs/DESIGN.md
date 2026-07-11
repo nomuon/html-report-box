@@ -200,41 +200,45 @@ SoundCloud Artist Studio / Databricks 参照。ページ中央に大型 DropZone
 共有 URL の正はこのページ。上部メタバー + 下部 iframe の 2 段。
 
 ```
-┌──────────────────────────────────────────────┐
-│ タイトル(--text-xl)      [🔗 共有URLをコピー]   │
-│ 作成者 · 更新 2026/07/10 21:30 · [公開中]      │
-│                              [⚠ 通報] (ghost) │
-├──────────────────────────────────────────────┤
-│ <iframe sandbox="allow-scripts allow-forms    │
-│   allow-popups allow-modals" src=コンテンツURL>│
-│   （height: calc(100vh - header - メタバー)）  │
-└──────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ タイトル(--text-xl)                                          │
+│ 作成者 · 更新 2026/07/10 21:30 (· 非オーナーにはステータスチップ)│
+│ [公開トグル] [<> HTMLを編集] [⬆ 上書きアップロード]            │
+│ [✏ タイトル・説明] [🔗 共有URLをコピー] [⚠ 通報](公開中のみ)   │
+├────────────────────────────────────────────────────────────┤
+│ (非公開でオーナー/admin: 非公開プレビューバナー)                │
+│ <iframe sandbox="allow-scripts allow-forms                  │
+│   allow-popups allow-modals" src=コンテンツURL | srcdoc>     │
+│   （height: calc(100vh - header - メタバー)）                │
+└────────────────────────────────────────────────────────────┘
 ```
 
 - メタバーは `--color-surface` + border-bottom。iframe はフルブリード（`--container-max` 制限を外し全幅）、`border: none`
-- 「共有 URL をコピー」: このシェルページの URL（`location.origin + /reports/:id`）をコピー。§4.3 のフィードバック
-- オーナー本人が見た場合はメタバーに「編集」（`/mine` 相当の編集モーダルを開く）を追加
-- 通報ボタン: ゴースト（danger 色文字）。クリック → 確認モーダル「このレポートを通報しますか？」+ 理由 textarea（任意）→ POST 後トースト「通報を受け付けました。管理者が確認します」
-- `pending_review` のレポートをオーナー/admin 以外が開いた場合・存在しない ID: EmptyState「このレポートは表示できません」
-- iframe に **必ず** `sandbox="allow-scripts allow-forms allow-popups allow-modals"` を付ける（`allow-same-origin` は絶対に付けない）。`referrerPolicy="no-referrer"` も付与
+- **オーナー/admin のアクション**: 公開トグル（§4.4）/「HTMLを編集」（html kind のみ、§4.6）/「上書きアップロード」（小型 DropZone モーダル）/「タイトル・説明」（メタ編集モーダル）
+- 「共有 URL をコピー」: 公開中のみ表示。このシェルページの URL（`location.origin + /reports/:id`）をコピー。§4.3 のフィードバック
+- 通報ボタン: 公開中かつ非オーナーにのみ表示。ゴースト（danger 色文字）。クリック → 確認モーダル「このレポートを通報しますか？」+ 理由 textarea（任意）→ POST 後トースト「通報を受け付けました。管理者が確認します」
+- **非公開プレビュー**: private のレポートをオーナー/admin が開くと `GET /reports/:id/source` の HTML を `srcdoc` で埋め込み、上部に warning 色のバナー「非公開プレビュー — この内容はあなたと管理者のみ閲覧できます」（zip は追加アセット未解決の注記を付ける）
+- private / rejected / takedown のレポートをオーナー/admin 以外が開いた場合・存在しない ID: EmptyState「このレポートは表示できません」
+- iframe に **必ず** `sandbox="allow-scripts allow-forms allow-popups allow-modals"` を付ける（`allow-same-origin` は絶対に付けない）。`referrerPolicy="no-referrer"` も付与（srcdoc プレビューも同一 sandbox）
 
 ### 2.5 画面④: マイレポート（`/mine`）
 
-- テーブル表示固定。列: タイトル / ステータスチップ（4 状態全部あり得る）/ 更新日時 / 操作
-- 操作列: アイコンボタン 3 つ（tooltip 付き）: ✏️ メタ編集 / ⬆️ 上書きアップロード / 🗑 削除
-  - **メタ編集**: モーダル（タイトル + 説明の 2 項目 + 保存/キャンセル）
+- テーブル表示固定。列: タイトル / 公開状態 / 更新日時 / 操作
+- **公開状態列**: published・private は公開トグル（§4.4）、rejected・takedown はステータスチップ。verdict=warn の行はトグル横に ℹ️ tooltip（スキャン注意項目の要約）
+- 操作列: アイコンボタン 4 つ（tooltip 付き）: `<>` HTMLを編集（zip は disabled）/ ⬆️ 上書きアップロード / ✏️ タイトル・説明を編集 / 🗑 削除
+  - **HTMLを編集**: ワイドモーダル + monospace textarea（§4.6）
+  - **タイトル・説明**: モーダル（タイトル + 説明の 2 項目 + 保存/キャンセル）
   - **上書き**: モーダル内に小型 DropZone（min-height 180px、状態遷移は §4.2 と同一）。注記「上書きすると再スキャンが実行されます」
   - **削除**: 確認モーダル「「{title}」を削除しますか？ 共有 URL は無効になります。この操作は取り消せません」+ 削除（danger ボタン）/ キャンセル
-- `pending_review` 行はチップ横に ℹ️ tooltip「管理者の承認待ちです。承認されると公開されます」
 - `rejected` 行は行全体 60% opacity + チップ tooltip に拒否理由（API の findings 要約）
 - 0 件 EmptyState: 📄「あなたのレポートはまだありません」+「アップロードする」ボタン
 
 ### 2.6 画面⑤: 管理画面（`/admin`）
 
-タブ 2 つ（下線式タブ、選択タブは `--color-primary` の 2px 下線 + 太字）:
+タブ 3 つ（下線式タブ、選択タブは `--color-primary` の 2px 下線 + 太字）:
 
-1. **承認キュー**: `pending_review` の一覧テーブル。列: タイトル / 作成者 / 検知内容（warn ルール名を danger 色 `--text-xs` チップで列挙）/ 申請日時 / 操作「プレビュー」（新規タブで詳細シェルを開く）・「承認」（success 系プライマリ）・「却下」（danger）。承認・却下とも確認モーダル必須。0 件 EmptyState: ✅「承認待ちのレポートはありません」
-2. **全レポート**: 全 status の一覧 + status フィルタチップ（複数選択トグル）。操作: 「テイクダウン」（danger、確認モーダル「公開を停止し削除します。よろしいですか？」）
+1. **通報**: 通報（abuse flag）が付いたレポートの一覧テーブル。列: タイトル / 作成者 / ステータス / 通報（件数バッジ。クリックで理由一覧モーダル）/ 最終通報日時 / 操作「プレビュー」（新規タブで詳細シェルを開く）・「テイクダウン」（danger、published のみ）・「通報を解決」（ghost、確認モーダルで flag を全消去）。0 件 EmptyState: ✅「未対応の通報はありません」
+2. **全レポート**: 全 status の一覧 + status フィルタチップ（複数選択トグル）。操作: 「テイクダウン」（danger、確認モーダル、published のみ）
 3. **ユーザー管理**: ユーザー一覧（ユーザー名 / メール / admin チップ）。操作: 「admin 付与」「admin 剥奪」トグルボタン（確認モーダル付き）
 
 ## 3. コンポーネント仕様
@@ -258,10 +262,10 @@ SoundCloud Artist Studio / Databricks 参照。ページ中央に大型 DropZone
 
 | status | ラベル | fg / bg |
 |---|---|---|
-| processing | 処理中 | `--status-processing-*`（ドットは CSS pulse アニメ 1.2s） |
 | published | 公開中 | `--status-published-*` |
-| pending_review | 承認待ち | `--status-pending-*` |
+| private | 非公開 | 中立色（fg `--color-text-muted` / bg `--color-surface-2`） |
 | rejected | 拒否 | `--status-rejected-*` |
+| takedown | 管理停止 | `--status-rejected-*` |
 
 - 種類チップ（HTML / ZIP）は中立色: bg `--color-surface-2`、fg `--color-text-muted`、ドットなし
 
@@ -319,7 +323,7 @@ idle --(dragenter)--> dragover --(drop/選択)--> [クライアント検証]
   ├─ NG（拡張子/サイズ）→ idle に戻し danger トースト
   └─ OK → メタ入力 → 「アップロード」→ uploading --(S3 PUT 完了)-->
      scanning --(complete API 応答)--> done | rejected
-                                  └ verdict=warn → done（承認待ち文言）
+                                  └ done = private（verdict=warn は注意項目を表示）
 ```
 
 | 状態 | 見た目 |
@@ -328,7 +332,7 @@ idle --(dragenter)--> dragover --(drop/選択)--> [クライアント検証]
 | dragover | border を solid `--color-primary` に、bg `--color-primary-subtle`、全体 scale(1.01)。文言「ドロップしてアップロード」。※dragleave の児要素チラつき対策にカウンタ方式を使う |
 | uploading | ボーダー solid `--color-border`。ファイル名 + サイズ表示 + ProgressBar（S3 PUT の進捗 %。XMLHttpRequest の `upload.onprogress` を使う。fetch では進捗が取れない）+ 「キャンセル」ghost |
 | scanning | ProgressBar 不確定モード + 🛡 アイコン + 「セキュリティスキャン中…」（muted）。キャンセル不可 |
-| done | ✅ 48px + 「アップロードが完了しました」+ 共有 URL 行（§4.3）+ ボタン行。verdict=warn の場合は代わりに §4.4 の承認待ち表示 |
+| done | ✅ 48px + 「アップロードが完了しました」+ 非公開である旨の説明 + 「公開する」primary（クリックで publish API → 共有 URL 行 §4.3 に切替）/「詳細を見る」secondary /「続けてアップロード」ghost。verdict=warn は注意項目リストを warning-subtle ボックスで表示 |
 | rejected | ⛔ 48px + 「アップロードを拒否しました」（danger 色太字）+ 理由リスト（API findings の日本語 message を `--text-sm` で列挙）+ 「別のファイルを試す」secondary ボタン（idle へ戻る） |
 
 - ページ全体への drop 事故防止: `window` の dragover/drop で `preventDefault()`
@@ -346,13 +350,20 @@ idle --(dragenter)--> dragover --(drop/選択)--> [クライアント検証]
 - クリック → `navigator.clipboard.writeText` → ボタンが 2 秒間「✓ コピーしました」（success 色文字）に変化して戻る + success トースト「共有 URL をコピーしました」。詳細シェルのヘッダーボタンも同挙動（トーストのみでも可）
 - 失敗時（権限等）: input を全選択状態にして danger トースト「コピーできませんでした。URL を選択してコピーしてください」
 
-### 4.4 warn（承認待ち）時の表示
+### 4.4 公開/非公開トグル
 
-- DropZone done 位置に: 🕒 48px + 見出し「アップロードを受け付けました — 管理者の承認待ちです」（`--status-pending-fg`）
-- 本文（`--text-sm`, muted）: 「セキュリティスキャンで確認が必要な項目が見つかったため、管理者が内容を確認してから公開されます。公開されるまで共有 URL は他のユーザーには表示されません。状況は「マイレポート」で確認できます」
-- 検知項目を warning-subtle 背景のボックスに `--text-xs` で列挙（例: 「外部サイトへ送信するフォームが含まれています」）
-- ボタン: 「マイレポートへ」primary / 「続けてアップロード」ghost
-- admin 承認後の反映はポーリング不要（ユーザーが再訪時に published を見る）
+- `role="switch"` のトグル（トラック 36×20px + サム 14px + テキストラベル「公開中/非公開」）。ON は `--status-published-fg`
+- **公開（OFF→ON）**: 確認モーダル「レポートを公開しますか？」（一覧・検索に表示され、共有 URL を知っている人は誰でも閲覧できる旨 + いつでも戻せる旨）→ publish API → success トースト
+- **非公開（ON→OFF）**: 即時実行（再トグルですぐ戻せるため確認なし）→ unpublish API → success トースト「非公開にしました。内容は保持され、あなたと管理者のみ閲覧できます」
+- rejected / takedown はトグル非表示（チップ表示）。verdict=warn は付随の ℹ️ tooltip で注意項目を提示（公開はオーナー判断）
+
+### 4.6 HTML 直接編集モーダル
+
+- ワイドモーダル（width min(960px, 100vw-32px)）+ monospace textarea（min-height min(480px, 55vh)、`white-space: pre`）
+- `GET /reports/:id/source` でソースをロード → 編集 → 「保存」で `PUT /reports/:id/content`。フッター左に注記「保存すると再スキャンが実行されます」。変更がない間は保存 disabled
+- 保存結果: published なら「保存しました。公開中の内容を更新しました」/ private なら「保存しました（非公開のまま）」。verdict=warn は info トースト追加
+- **block された場合**: モーダルは閉じず、編集内容を保持したまま danger ボックスで findings を列挙（修正して再保存で private に復帰できる）
+- zip kind は編集不可（ボタン disabled、tooltip「ZIPは直接編集できません」）
 
 ### 4.5 その他マイクロコピー一覧（トースト等）
 
@@ -361,9 +372,10 @@ idle --(dragenter)--> dragover --(drop/選択)--> [クライアント検証]
 | メタ編集保存 | success | 変更を保存しました |
 | 削除完了 | success | レポートを削除しました |
 | 上書き完了 | success | レポートを上書きしました |
-| admin 承認 | success | レポートを承認し公開しました |
-| admin 却下 | success | レポートを却下しました |
-| テイクダウン | success | レポートを非公開にしました |
+| 公開 | success | レポートを公開しました。共有URLで誰でも閲覧できます |
+| 非公開化 | success | 非公開にしました。内容は保持され、あなたと管理者のみ閲覧できます |
+| テイクダウン | success | レポートを公開停止しました |
+| 通報解決 | success | 通報を解決済みにしました |
 | admin 権限変更 | success | 権限を更新しました |
 | 認可エラー(401/403) | danger | この操作にはログインが必要です／権限がありません |
 | 汎用エラー | danger | エラーが発生しました。時間をおいて再試行してください |

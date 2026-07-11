@@ -41,6 +41,9 @@ export function UploadPage() {
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
+  // アップロード完了後に「公開する」を押したときの共有URL
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
   const fileRef = useRef<File | null>(null);
 
   if (!session) {
@@ -120,47 +123,71 @@ export function UploadPage() {
     fileRef.current = null;
     setTitle("");
     setDescription("");
+    setPublishedUrl(null);
     dispatch({ type: "RESET" });
   };
 
-  const shareUrl =
-    state.phase === "done" ? `${location.origin}/reports/${state.report.id}` : "";
+  const publishNow = async (id: string) => {
+    setPublishing(true);
+    try {
+      await api.publishReport(id);
+      setPublishedUrl(`${location.origin}/reports/${id}`);
+      toast.push("success", "レポートを公開しました");
+      void queryClient.invalidateQueries({ queryKey: ["reports"] });
+      void queryClient.invalidateQueries({ queryKey: ["my-reports"] });
+    } catch (err) {
+      toast.push("danger", isApiError(err) ? err.message : "公開に失敗しました。時間をおいて再試行してください");
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   const resultContent =
     state.phase === "done" ? (
-      state.report.status === "pending_review" ? (
-        // verdict=warn → 承認待ち表示（§4.4）
-        <div className="hrb-upload-result hrb-upload-result--warn">
+      publishedUrl !== null ? (
+        // 公開済み → 共有URLを提示
+        <div className="hrb-upload-result">
           <div className="hrb-upload-result__icon" aria-hidden="true">
-            <Icon name="clock" size={28} />
+            <Icon name="check-circle" size={28} />
           </div>
-          <h2 className="hrb-upload-result__title hrb-upload-result__title--pending">
-            アップロードを受け付けました — 管理者の承認待ちです
-          </h2>
-          <p className="hrb-upload-result__body">
-            セキュリティスキャンで確認が必要な項目が見つかったため、管理者が内容を確認してから公開されます。
-            公開されるまで共有 URL は他のユーザーには表示されません。状況は「マイレポート」で確認できます
-          </p>
-          <div className="hrb-upload-result__findings">
-            <FindingsList findings={state.report.findings} />
-          </div>
+          <h2 className="hrb-upload-result__title">公開しました</h2>
+          <p className="hrb-upload-result__body">共有URLで誰でも閲覧できます</p>
+          <CopyUrlRow url={publishedUrl} />
           <div className="hrb-upload-result__actions">
-            <Button onClick={() => navigate("/mine")}>マイレポートへ</Button>
-            <Button variant="ghost" onClick={reset}>
+            <Button onClick={() => navigate(`/reports/${state.report.id}`)}>詳細を見る</Button>
+            <Button variant="secondary" onClick={reset}>
               続けてアップロード
             </Button>
           </div>
         </div>
       ) : (
+        // アップロード直後は非公開 — その場で公開できる
         <div className="hrb-upload-result">
           <div className="hrb-upload-result__icon" aria-hidden="true">
             <Icon name="check-circle" size={28} />
           </div>
           <h2 className="hrb-upload-result__title">アップロードが完了しました</h2>
-          <CopyUrlRow url={shareUrl} />
+          <p className="hrb-upload-result__body">
+            現在は<strong>非公開</strong>です。あなたと管理者だけが内容を確認できます。
+            公開すると一覧・検索に表示され、共有URLで誰でも閲覧できるようになります
+          </p>
+          {state.report.verdict === "warn" && (
+            <div className="hrb-upload-result__findings">
+              <p className="hrb-upload-result__note">
+                スキャンで注意項目が見つかりました。内容を確認のうえ公開してください:
+              </p>
+              <FindingsList findings={state.report.findings} />
+            </div>
+          )}
           <div className="hrb-upload-result__actions">
-            <Button onClick={() => navigate(`/reports/${state.report.id}`)}>詳細を見る</Button>
-            <Button variant="secondary" onClick={reset}>
+            <Button loading={publishing} onClick={() => void publishNow(state.report.id)}>
+              <Icon name="eye" size={16} />
+              公開する
+            </Button>
+            <Button variant="secondary" onClick={() => navigate(`/reports/${state.report.id}`)}>
+              詳細を見る
+            </Button>
+            <Button variant="ghost" onClick={reset}>
               続けてアップロード
             </Button>
           </div>

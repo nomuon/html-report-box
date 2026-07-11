@@ -4,6 +4,9 @@
  * tested under `bun test` with a mocked fetch.
  */
 import type {
+  AdminClearFlagsResponse,
+  AdminListFlagsResponse,
+  AdminListFlaggedResponse,
   AdminListReportsResponse,
   AdminListUsersResponse,
   AdminReportActionResponse,
@@ -16,25 +19,18 @@ import type {
   FlagReportResponse,
   GetConfigResponse,
   GetReportResponse,
+  GetReportSourceResponse,
   ListReportsResponse,
   MyReportsResponse,
+  PublishReportResponse,
   ReportKind,
   ReportStatus,
   SearchResponse,
+  UnpublishReportResponse,
+  UpdateReportContentResponse,
   UpdateReportRequest,
   UpdateReportResponse,
 } from "@hrb/shared";
-
-/** Flags as returned by GET /admin/reports/:id/flags (shape defined by @hrb/core). */
-export interface ReportFlagView {
-  reason: string;
-  createdAt: string;
-  sourceIp?: string;
-}
-
-export interface AdminListFlagsResponse {
-  flags: ReportFlagView[];
-}
 
 export class ApiError extends Error {
   readonly code: ErrorCode | "network";
@@ -165,6 +161,26 @@ export class ApiClient {
     return this.request("PATCH", `/reports/${encodeURIComponent(id)}`, { body: patch });
   }
 
+  publishReport(id: string): Promise<PublishReportResponse> {
+    return this.request("POST", `/reports/${encodeURIComponent(id)}/publish`);
+  }
+
+  unpublishReport(id: string): Promise<UnpublishReportResponse> {
+    return this.request("POST", `/reports/${encodeURIComponent(id)}/unpublish`);
+  }
+
+  /** Source HTML for the owner's editor / private preview. */
+  getReportSource(id: string): Promise<GetReportSourceResponse> {
+    return this.request("GET", `/reports/${encodeURIComponent(id)}/source`);
+  }
+
+  /** Direct HTML edit (html kind only). Triggers a full re-scan server-side. */
+  updateReportContent(id: string, html: string): Promise<UpdateReportContentResponse> {
+    return this.request("PUT", `/reports/${encodeURIComponent(id)}/content`, {
+      body: { html },
+    });
+  }
+
   deleteReport(id: string): Promise<DeleteReportResponse> {
     return this.request("DELETE", `/reports/${encodeURIComponent(id)}`);
   }
@@ -179,16 +195,16 @@ export class ApiClient {
     });
   }
 
+  adminListFlagged(): Promise<AdminListFlaggedResponse> {
+    return this.request("GET", "/admin/flagged");
+  }
+
   adminListFlags(id: string): Promise<AdminListFlagsResponse> {
     return this.request("GET", `/admin/reports/${encodeURIComponent(id)}/flags`);
   }
 
-  adminApprove(id: string): Promise<AdminReportActionResponse> {
-    return this.request("POST", `/admin/reports/${encodeURIComponent(id)}/approve`);
-  }
-
-  adminReject(id: string): Promise<AdminReportActionResponse> {
-    return this.request("POST", `/admin/reports/${encodeURIComponent(id)}/reject`);
+  adminClearFlags(id: string): Promise<AdminClearFlagsResponse> {
+    return this.request("DELETE", `/admin/reports/${encodeURIComponent(id)}/flags`);
   }
 
   adminTakedown(id: string): Promise<AdminReportActionResponse> {

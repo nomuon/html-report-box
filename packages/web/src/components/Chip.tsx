@@ -1,17 +1,15 @@
 import type { ReportKind, ReportStatus } from "@hrb/shared";
 
 export const STATUS_LABELS: Record<ReportStatus, string> = {
-  processing: "処理中",
   published: "公開中",
-  pending_review: "承認待ち",
+  private: "非公開",
   rejected: "拒否",
-  takedown: "非公開",
+  takedown: "管理停止",
 };
 
 const STATUS_CLASS: Record<ReportStatus, string> = {
-  processing: "hrb-chip--processing",
   published: "hrb-chip--published",
-  pending_review: "hrb-chip--pending",
+  private: "hrb-chip--private",
   rejected: "hrb-chip--rejected",
   takedown: "hrb-chip--rejected",
 };

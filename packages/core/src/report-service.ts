@@ -1,8 +1,9 @@
 /**
  * ReportService — domain logic for the report lifecycle:
  * create (META + presigned upload) → complete (validate → extract → scan →
- * publish / pending_review / rejected) → list / get / search / update /
- * delete, plus admin approve / reject / takedown and abuse flags.
+ * private / rejected) → publish / unpublish (owner-controlled visibility) →
+ * list / get / search / update / editContent / delete, plus admin takedown
+ * and abuse flags (通報).
  * Portable (Node 22); no Bun-only APIs.
  */
 import { createHash } from "node:crypto";
@@ -180,7 +181,7 @@ export class ReportService {
       description: request.description,
       ownerSub: user.sub,
       ownerName: user.name,
-      status: "processing",
+      status: "private",
       kind: request.kind,
       version: 1,
       createdAt: nowIso,
@@ -215,11 +216,12 @@ export class ReportService {
   }
 
   /**
-   * Finish an upload: validate the staged object, extract metadata/text,
-   * run the security scan and branch on the verdict:
-   *   pass → publish (content copy + .extracted.txt + index)  [url returned]
-   *   warn → pending_review (staged object retained for admin approval)
-   *   block → rejected (staged sample retained for forensics)
+   * Finish an upload: validate the staged object, run the security scan and
+   * branch on the verdict:
+   *   block       → rejected (content + source purged; staged sample retained)
+   *   pass / warn → source stored; a published report is re-published in
+   *                 place, anything else lands (or stays) private until the
+   *                 owner publishes it explicitly
    */
   async complete(
     user: AuthUser,
@@ -244,43 +246,113 @@ export class ReportService {
       throw new DomainError("payload_too_large", `upload exceeds ${maxSize} bytes`);
     }
 
-    const nowIso = this.now().toISOString();
-    const isOverwrite = meta.sha256 !== undefined;
-    const next: ReportMeta = {
-      ...meta,
-      sha256: createHash("sha256").update(data).digest("hex"),
-      sizeBytes: data.byteLength,
-      version: isOverwrite ? meta.version + 1 : meta.version,
-      updatedAt: nowIso,
-    };
-
-    const scan = await this.scanner.scan({ kind: meta.kind, data });
-    next.verdict = scan.verdict;
-    next.findings = scan.findings;
-
-    if (scan.verdict === "block") {
-      // Reject and take any previously published content down.
-      // Staged sample is intentionally retained (30-day lifecycle in AWS).
-      next.status = "rejected";
-      await this.removeFromIndex(id);
-      await this.storage.deleteContentPrefix(`reports/${id}/`);
-      await this.repo.update(next);
-      await this.cdn.invalidate([`/r/${id}/*`]);
-      return { report: next };
-    }
-
-    if (scan.verdict === "warn") {
-      // Hold in staging until an admin approves; previous published content
-      // (already scanned) stays live until then.
-      next.status = "pending_review";
-      await this.repo.update(next);
-      return { report: next };
-    }
-
-    await this.publishContent(next, data);
+    const result = await this.ingest(meta, data);
     await this.repo.clearPendingUpload(id);
-    await this.storage.deleteStagingObject(key);
-    return { report: next, url: this.contentUrl(id) };
+    if (result.report.status !== "rejected") {
+      // Staged sample of a blocked upload is intentionally retained
+      // (30-day lifecycle in AWS).
+      await this.storage.deleteStagingObject(key);
+    }
+    return result;
+  }
+
+  /** Make a private report publicly visible (owner or admin). Idempotent. */
+  async publish(user: AuthUser, id: string): Promise<{ report: ReportMeta; url: string }> {
+    const meta = await this.mustGet(id);
+    this.assertOwnerOrAdmin(user, meta);
+    if (meta.status === "takedown" && !user.isAdmin) {
+      throw new DomainError("forbidden", "report was taken down by an administrator");
+    }
+    if (meta.status === "published") {
+      return { report: meta, url: this.contentUrl(id) };
+    }
+    if (meta.status === "rejected") {
+      throw new DomainError(
+        "conflict",
+        "report was rejected by the security scan; upload a fixed version first",
+      );
+    }
+    const data =
+      meta.sha256 !== undefined ? await this.storage.getContentObject(this.sourceKey(id)) : null;
+    if (!data) {
+      throw new DomainError("conflict", "report has no publishable content; upload it first");
+    }
+    const { files, extraction } = await this.extractFiles(meta.kind, data);
+    meta.updatedAt = this.now().toISOString();
+    await this.writePublic(meta, files, extraction.text);
+    return { report: meta, url: this.contentUrl(id) };
+  }
+
+  /**
+   * Hide a published report (owner or admin): removed from list / search /
+   * content origin, but META and the editable source are kept. Idempotent.
+   */
+  async unpublish(user: AuthUser, id: string): Promise<ReportMeta> {
+    const meta = await this.mustGet(id);
+    this.assertOwnerOrAdmin(user, meta);
+    if (meta.status === "takedown" && !user.isAdmin) {
+      throw new DomainError("forbidden", "report was taken down by an administrator");
+    }
+    if (meta.status === "private") return meta;
+    if (meta.status !== "published") {
+      throw new DomainError("conflict", `report is ${meta.status}, not published`);
+    }
+    await this.removeFromIndex(id);
+    await this.storage.deleteContentPrefix(`reports/${id}/`);
+    meta.status = "private";
+    meta.updatedAt = this.now().toISOString();
+    await this.repo.update(meta);
+    await this.cdn.invalidate([`/r/${id}/*`]);
+    return meta;
+  }
+
+  /**
+   * Source HTML for the owner's editor / private preview (owner or admin).
+   * html kind → the uploaded source; zip kind → the extracted root index.html.
+   */
+  async getSource(user: AuthUser, id: string): Promise<{ kind: ReportKind; html: string }> {
+    const meta = await this.mustGet(id);
+    this.assertOwnerOrAdmin(user, meta);
+    if (meta.status === "takedown" && !user.isAdmin) {
+      throw new DomainError("forbidden", "report was taken down by an administrator");
+    }
+    const data =
+      meta.sha256 !== undefined ? await this.storage.getContentObject(this.sourceKey(id)) : null;
+    if (!data) throw new DomainError("not_found", "report has no stored content");
+    if (meta.kind === "html") {
+      return { kind: "html", html: new TextDecoder().decode(data) };
+    }
+    const { files } = await this.extractFiles("zip", data);
+    const index = files.find((f) => f.path === "index.html");
+    return { kind: "zip", html: new TextDecoder().decode(index?.data ?? new Uint8Array()) };
+  }
+
+  /**
+   * Direct HTML edit (html kind only). Runs the full scan pipeline exactly
+   * like an overwrite upload (counts against the daily upload quota).
+   */
+  async editContent(
+    user: AuthUser,
+    id: string,
+    html: string,
+  ): Promise<{ report: ReportMeta; url?: string }> {
+    const meta = await this.mustGet(id);
+    this.assertOwnerOrAdmin(user, meta);
+    if (meta.status === "takedown" && !user.isAdmin) {
+      throw new DomainError("forbidden", "report was taken down by an administrator");
+    }
+    if (meta.kind !== "html") {
+      throw new DomainError("bad_request", "direct editing is only available for html reports");
+    }
+    if (meta.sha256 === undefined) {
+      throw new DomainError("conflict", "report has no uploaded content to edit yet");
+    }
+    const data = new TextEncoder().encode(html);
+    if (data.byteLength > MAX_HTML_SIZE_BYTES) {
+      throw new DomainError("payload_too_large", `content exceeds ${MAX_HTML_SIZE_BYTES} bytes`);
+    }
+    await this.consumeUploadQuota(user);
+    return this.ingest(meta, data);
   }
 
   async update(user: AuthUser, id: string, patch: UpdateReportRequest): Promise<ReportMeta> {
@@ -307,6 +379,7 @@ export class ReportService {
     this.assertOwnerOrAdmin(user, meta);
     await this.removeFromIndex(id);
     await this.storage.deleteContentPrefix(`reports/${id}/`);
+    await this.storage.deleteContentPrefix(`sources/${id}/`);
     const pendingKey = await this.repo.getPendingUpload(id);
     if (pendingKey) await this.storage.deleteStagingObject(pendingKey);
     await this.repo.delete(id);
@@ -347,39 +420,27 @@ export class ReportService {
     return this.repo.listFlags(id);
   }
 
-  /** Publish a pending_review report from its retained staging object. */
-  async adminApprove(user: AuthUser, id: string): Promise<ReportMeta> {
+  /** 通報一覧: reports that received abuse flags, newest flag first. */
+  async adminListFlagged(
+    user: AuthUser,
+  ): Promise<Array<{ report: ReportMeta; flags: ReportFlag[] }>> {
     this.assertAdmin(user);
-    const meta = await this.mustGet(id);
-    if (meta.status !== "pending_review") {
-      throw new DomainError("conflict", `report is ${meta.status}, not pending_review`);
-    }
-    const key = await this.repo.getPendingUpload(id);
-    const data = key ? await this.storage.getStagingObject(key) : null;
-    if (!key || !data) {
-      throw new DomainError("conflict", "staged object for this review no longer exists");
-    }
-    meta.updatedAt = this.now().toISOString();
-    await this.publishContent(meta, data);
-    await this.repo.clearPendingUpload(id);
-    await this.storage.deleteStagingObject(key);
-    return meta;
+    const flagged = await this.repo.listFlagged();
+    const metas = await this.repo.getMany(flagged.map((f) => f.id));
+    const items = flagged.flatMap(({ id, flags }) => {
+      const report = metas.get(id);
+      return report && flags.length > 0 ? [{ report, flags }] : [];
+    });
+    const latest = (flags: ReportFlag[]) =>
+      flags.reduce((max, f) => (f.createdAt > max ? f.createdAt : max), "");
+    items.sort((a, b) => latest(b.flags).localeCompare(latest(a.flags)));
+    return items;
   }
 
-  /** Reject a pending_review report (staged sample retained). */
-  async adminReject(user: AuthUser, id: string): Promise<ReportMeta> {
+  /** Resolve a report's flags (通報を処理済みにする). */
+  async adminClearFlags(user: AuthUser, id: string): Promise<void> {
     this.assertAdmin(user);
-    const meta = await this.mustGet(id);
-    if (meta.status !== "pending_review") {
-      throw new DomainError("conflict", `report is ${meta.status}, not pending_review`);
-    }
-    meta.status = "rejected";
-    meta.updatedAt = this.now().toISOString();
-    await this.removeFromIndex(id);
-    await this.storage.deleteContentPrefix(`reports/${id}/`);
-    await this.repo.update(meta);
-    await this.cdn.invalidate([`/r/${id}/*`]);
-    return meta;
+    await this.repo.clearFlags(id);
   }
 
   /** Unpublish + purge content, keep META for audit. */
@@ -460,16 +521,77 @@ export class ReportService {
     );
   }
 
+  /** Storage key of the canonical uploaded bytes (kept while the report exists). */
+  private sourceKey(id: string): string {
+    return `sources/${id}/current`;
+  }
+
   /**
-   * Write content objects + extracted text, rebuild the search index and mark
-   * the report published. Mutates `meta` (status/description) and persists it.
+   * Scan + store new content bytes and persist the outcome:
+   *   block       → rejected (index/content/source purged)
+   *   pass / warn → source object replaced; published reports are
+   *                 re-published in place, all other statuses become private
    */
-  private async publishContent(meta: ReportMeta, data: Uint8Array): Promise<void> {
+  private async ingest(
+    meta: ReportMeta,
+    data: Uint8Array,
+  ): Promise<{ report: ReportMeta; url?: string }> {
     const id = meta.id;
+    const isOverwrite = meta.sha256 !== undefined;
+    const next: ReportMeta = {
+      ...meta,
+      sha256: createHash("sha256").update(data).digest("hex"),
+      sizeBytes: data.byteLength,
+      version: isOverwrite ? meta.version + 1 : meta.version,
+      updatedAt: this.now().toISOString(),
+    };
+
+    const scan = await this.scanner.scan({ kind: meta.kind, data });
+    next.verdict = scan.verdict;
+    next.findings = scan.findings;
+
+    if (scan.verdict === "block") {
+      next.status = "rejected";
+      await this.removeFromIndex(id);
+      await this.storage.deleteContentPrefix(`reports/${id}/`);
+      await this.storage.deleteContentPrefix(`sources/${id}/`);
+      await this.repo.update(next);
+      await this.cdn.invalidate([`/r/${id}/*`]);
+      return { report: next };
+    }
+
+    // Validates the payload (zip must contain a root index.html) before
+    // anything is persisted.
+    const { files, extraction } = await this.extractFiles(next.kind, data);
+    if (next.description === "" && extraction.description) {
+      next.description = extraction.description.slice(0, REPORT_DESCRIPTION_MAX);
+    }
+    await this.storage.putContentObject(
+      this.sourceKey(id),
+      data,
+      next.kind === "html" ? "text/html; charset=utf-8" : "application/zip",
+    );
+
+    if (meta.status === "published") {
+      await this.writePublic(next, files, extraction.text);
+      return { report: next, url: this.contentUrl(id) };
+    }
+    next.status = "private";
+    await this.repo.update(next);
+    return { report: next };
+  }
+
+  /** Extract servable files + index text; validates zip structure. */
+  private async extractFiles(
+    kind: ReportKind,
+    data: Uint8Array,
+  ): Promise<{
+    files: Array<{ path: string; data: Uint8Array }>;
+    extraction: ReturnType<typeof extractHtml>;
+  }> {
     let files: Array<{ path: string; data: Uint8Array }>;
     let htmlBytes: Uint8Array;
-
-    if (meta.kind === "zip") {
+    if (kind === "zip") {
       if (!this.zipExtractor) {
         throw new DomainError("bad_request", "zip uploads are not supported in this deployment");
       }
@@ -484,12 +606,19 @@ export class ReportService {
       files = [{ path: "index.html", data }];
       htmlBytes = data;
     }
+    return { files, extraction: extractHtml(new TextDecoder().decode(htmlBytes)) };
+  }
 
-    const extraction = extractHtml(new TextDecoder().decode(htmlBytes));
-    if (meta.description === "" && extraction.description) {
-      meta.description = extraction.description.slice(0, REPORT_DESCRIPTION_MAX);
-    }
-
+  /**
+   * Write content objects + extracted text, rebuild the search index and mark
+   * the report published. Mutates `meta` and persists it.
+   */
+  private async writePublic(
+    meta: ReportMeta,
+    files: Array<{ path: string; data: Uint8Array }>,
+    bodyText: string,
+  ): Promise<void> {
+    const id = meta.id;
     for (const file of files) {
       await this.storage.putContentObject(
         `reports/${id}/${file.path}`,
@@ -499,12 +628,11 @@ export class ReportService {
     }
     await this.storage.putContentObject(
       `reports/${id}/${EXTRACTED_TEXT_FILENAME}`,
-      new TextEncoder().encode(extraction.text),
+      new TextEncoder().encode(bodyText),
       "text/plain; charset=utf-8",
     );
-
     meta.status = "published";
-    await this.reindex(meta, extraction.text);
+    await this.reindex(meta, bodyText);
     await this.repo.update(meta);
     await this.cdn.invalidate([`/r/${id}/*`]);
   }

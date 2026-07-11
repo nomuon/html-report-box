@@ -28,7 +28,7 @@ function sampleMeta(overrides: Partial<ReportMeta> = {}): ReportMeta {
     description: "",
     ownerSub: "user-1",
     ownerName: "Alice",
-    status: "processing",
+    status: "private",
     kind: "html",
     version: 1,
     createdAt: "2026-07-01T00:00:00.000Z",
@@ -60,7 +60,7 @@ describe("meta item mapping (pk/sk/GSI projections)", () => {
   });
 
   test("non-published META omits GSI1 keys entirely (sparse index)", () => {
-    for (const status of ["processing", "rejected", "pending_review", "takedown"] as const) {
+    for (const status of ["private", "rejected", "takedown"] as const) {
       const item = metaToItem(sampleMeta({ status }));
       expect("gsi1pk" in item).toBe(false);
       expect("gsi1sk" in item).toBe(false);
@@ -201,13 +201,13 @@ describe("lists", () => {
     const client = new FakeClient().on("ScanCommand", () => ({
       Items: [metaToItem(older), metaToItem(newer)],
     }));
-    const page = await repo(client).listAll({ status: "pending_review" });
+    const page = await repo(client).listAll({ status: "private" });
     const [input] = client.inputsOf("ScanCommand");
     expect(input.FilterExpression).toBe("sk = :meta AND #status = :status");
     expect(input.ExpressionAttributeNames).toEqual({ "#status": "status" });
     expect(input.ExpressionAttributeValues).toEqual({
       ":meta": SK_META,
-      ":status": "pending_review",
+      ":status": "private",
     });
     expect(page.items.map((m) => m.id)).toEqual([newer.id, older.id]);
 
