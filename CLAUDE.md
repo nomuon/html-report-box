@@ -28,7 +28,7 @@ bun run --filter @hrb/infra synth    # Lambda バンドル + cdk synth
 bun test packages/infra --update-snapshots   # CDK snapshot 更新
 ```
 
-dev サーバーは 1 プロセスで全部入り: SPA (`/`) / API (`/api/*`) / presigned POST 代替 (`/local-upload`) / 公開コンテンツ配信 (`/r/<id>/`) / リモート MCP (`/mcp`)。dev では `x-dev-user: alice | bob | admin` ヘッダーでユーザー切替（admin のみ管理操作可）、MCP は API キー不要。データは `.local-data/`（`HRB_DATA_DIR` / `PORT` で変更可）。
+dev サーバーは 1 プロセスで全部入り: SPA (`/`) / API (`/api/*`) / presigned POST 代替 (`/local-upload`) / 公開コンテンツ配信 (`/r/<id>/`) / リモート MCP (`/mcp`)。dev では `x-dev-user: alice | bob | admin` ヘッダーでユーザー切替（admin のみ管理操作可）、MCP は API キー不要。`GOOGLE_CLIENT_ID` を設定すると実 Google アカウント認証（GIS）に切り替わる（`HRB_ADMIN_EMAILS` で admin 指定、README 参照）。データは `.local-data/`（`HRB_DATA_DIR` / `PORT` で変更可）。
 
 ## アーキテクチャ
 

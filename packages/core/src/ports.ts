@@ -12,6 +12,7 @@ import type {
   ReportStatus,
   ScanFinding,
   ScanVerdict,
+  SessionUser,
 } from "@hrb/shared";
 
 // ---- Auth ----
@@ -32,6 +33,17 @@ export interface AuthVerifier {
   verify(headers: Record<string, string | undefined>): Promise<AuthUser | null>;
   /** Client auth bootstrap info for GET /config. */
   authConfig(): AuthConfig;
+}
+
+/**
+ * Session login/logout for auth modes where the app issues its own session
+ * tokens (google mode). Absent in Cognito mode (Hosted UI owns the session).
+ */
+export interface SessionAuth {
+  /** Verifies a Google ID token, provisions the user on first login, returns a session. */
+  loginWithGoogle(credential: string): Promise<{ token: string; user: SessionUser }>;
+  /** Revokes the session token. Unknown tokens are a no-op. */
+  logout(token: string): Promise<void>;
 }
 
 // ---- Pagination ----

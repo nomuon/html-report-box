@@ -89,8 +89,42 @@ export const AuthConfigSchema = z.discriminatedUnion("mode", [
     /** Hosted UI domain, e.g. https://xxx.auth.ap-northeast-1.amazoncognito.com */
     domain: z.string().min(1),
   }),
+  z.object({
+    mode: z.literal("google"),
+    /** Google OAuth client id rendered into the GIS Sign in with Google button. */
+    clientId: z.string().min(1),
+  }),
 ]);
 export type AuthConfig = z.infer<typeof AuthConfigSchema>;
+
+// =====================
+// POST /auth/google + POST /auth/logout (google mode only)
+// =====================
+export const GoogleLoginRequestSchema = z.object({
+  /** Google ID token (GIS credential) issued to the configured client id. */
+  credential: z.string().min(1),
+});
+export type GoogleLoginRequest = z.infer<typeof GoogleLoginRequestSchema>;
+
+/** Authenticated user as returned to the SPA (session bootstrap). */
+export const SessionUserSchema = z.object({
+  sub: z.string().min(1),
+  name: z.string().min(1),
+  email: z.string().min(1),
+  picture: z.string().url().optional(),
+  isAdmin: z.boolean(),
+});
+export type SessionUser = z.infer<typeof SessionUserSchema>;
+
+export const GoogleLoginResponseSchema = z.object({
+  /** Opaque session token; sent back as `authorization: Bearer <token>`. */
+  token: z.string().min(1),
+  user: SessionUserSchema,
+});
+export type GoogleLoginResponse = z.infer<typeof GoogleLoginResponseSchema>;
+
+export const LogoutResponseSchema = z.object({ ok: z.literal(true) });
+export type LogoutResponse = z.infer<typeof LogoutResponseSchema>;
 
 export const GetConfigResponseSchema = z.object({
   /** Origin serving uploaded content, e.g. https://content.example.com */

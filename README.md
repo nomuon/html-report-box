@@ -94,6 +94,22 @@ dev サーバー 1 プロセスで全部入り:
 
 データは `.local-data/`（JSON + オブジェクト）に永続化。`HRB_DATA_DIR` / `PORT` 環境変数で変更可能。
 
+### Google ログイン（ローカルで実アカウント認証）
+
+既定はヘッダー切替の dev 認証だが、`GOOGLE_CLIENT_ID` を設定すると実際の Google アカウントでログイン/新規登録できる（GIS の Sign in with Google ボタン → ID トークンをサーバーで jose + Google JWKS 検証 → 30 日の opaque セッショントークンを発行、`.local-data/google-auth.json` に永続化。初回ログインで自動的にアカウント作成）。
+
+1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) で OAuth クライアント（種別: ウェブアプリケーション）を作成し、**承認済みの JavaScript 生成元**に `http://localhost:3000` を追加（ID トークンフローなのでリダイレクト URI は不要）
+2. `.env`（Bun が自動ロード）に設定:
+
+```bash
+GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com
+HRB_ADMIN_EMAILS=you@example.com   # カンマ区切り。管理者にするメールアドレス
+```
+
+3. `bun run dev` — 起動ログに `auth : google (...)` と出れば有効。管理画面からは Google ユーザーの admin 付与/削除（レポートカスケード）も可能。ローカル利便のため `x-dev-user` ヘッダーのフォールバックは google モードでも有効（curl / smoke 用。デプロイには載らないローカル専用アダプタ）。
+
+AWS 本番は従来どおり Cognito(Google IdP) 連携の設計で、この直接続フローは `core/src/local/` に閉じている。
+
 ### テスト・検証
 
 ```bash

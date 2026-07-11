@@ -19,6 +19,7 @@ import {
   CreateUploadUrlRequestSchema,
   DAILY_UPLOAD_LIMIT,
   FlagReportRequestSchema,
+  GoogleLoginRequestSchema,
   ListReportsQuerySchema,
   MAX_HTML_SIZE_BYTES,
   MAX_ZIP_ENTRIES,
@@ -34,7 +35,7 @@ import {
 } from "@hrb/shared";
 import type { GetConfigResponse } from "@hrb/shared";
 import { DomainError, isDomainError } from "@hrb/core";
-import type { AuthUser, AuthVerifier, PageOptions, ReportService, UserAdmin } from "@hrb/core";
+import type { AuthUser, AuthVerifier, PageOptions, ReportService, SessionAuth, UserAdmin } from "@hrb/core";
 import { createMemoryRateLimiter } from "./rate-limit.ts";
 import type { RateLimiter } from "./rate-limit.ts";
 
@@ -45,6 +46,8 @@ export const FLAG_RATE_WINDOW_MS = 10 * 60 * 1000;
 export interface AppContext {
   service: ReportService;
   auth: AuthVerifier;
+  /** Login/logout endpoints (google mode). Absent → routes are not mounted. */
+  sessionAuth?: SessionAuth;
   userAdmin: UserAdmin;
   /** Origin serving uploaded content, e.g. http://localhost:3000 (GET /config). */
   contentBaseUrl: string;
@@ -186,6 +189,23 @@ export function createApp(ctx: AppContext): AppType {
     };
     return c.json(config);
   });
+
+  // Session login/logout — mounted only when the auth mode issues its own
+  // sessions (google mode locally; Cognito owns the session in AWS mode).
+  const sessionAuth = ctx.sessionAuth;
+  if (sessionAuth) {
+    app.post("/auth/google", async (c) => {
+      const body = parseWith(GoogleLoginRequestSchema, await readJson(c), "login");
+      const session = await sessionAuth.loginWithGoogle(body.credential);
+      return c.json(session);
+    });
+
+    app.post("/auth/logout", async (c) => {
+      const token = c.req.header("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
+      if (token) await sessionAuth.logout(token);
+      return c.json({ ok: true as const });
+    });
+  }
 
   app.get("/reports", async (c) => {
     const query = parseWith(ListReportsQuerySchema, c.req.query(), "query");

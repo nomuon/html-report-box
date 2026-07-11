@@ -20,6 +20,7 @@
     "@aws-sdk/s3-presigned-post": "^3.1084.0",
     "@hrb/shared": "workspace:*",
     "aws-jwt-verify": "^5.1.0",
+    "jose": "^6.2.3",
     "parse5": "^7.2.1"
   }
 }

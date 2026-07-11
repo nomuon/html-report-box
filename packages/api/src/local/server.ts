@@ -22,15 +22,26 @@ const PORT = Number(process.env.PORT ?? 3000);
 const DATA_DIR = process.env.HRB_DATA_DIR ?? ".local-data";
 const BASE_URL = `http://localhost:${PORT}`;
 
+// Real Google login when GOOGLE_CLIENT_ID is set; dev-user header otherwise.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const ADMIN_EMAILS = (process.env.HRB_ADMIN_EMAILS ?? "")
+  .split(",")
+  .map((e) => e.trim())
+  .filter((e) => e.length > 0);
+
 const ctx = createLocalContext({
   dataDir: DATA_DIR,
   contentBaseUrl: BASE_URL,
   scanner: createScanner({ domainReputation: new StubDomainReputation() }),
   zipExtractor: createZipExtractor(),
+  ...(GOOGLE_CLIENT_ID
+    ? { googleAuth: { clientId: GOOGLE_CLIENT_ID, adminEmails: ADMIN_EMAILS } }
+    : {}),
 });
 const app = createApp({
   service: ctx.service,
   auth: ctx.auth,
+  ...(ctx.sessionAuth ? { sessionAuth: ctx.sessionAuth } : {}),
   userAdmin: ctx.userAdmin,
   contentBaseUrl: BASE_URL,
 });
@@ -40,7 +51,7 @@ const app = createApp({
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  "access-control-allow-headers": "content-type, x-dev-user",
+  "access-control-allow-headers": "content-type, x-dev-user, authorization",
   "access-control-max-age": "86400",
 };
 
@@ -209,6 +220,10 @@ const server = Bun.serve({
 console.log(`[dev] HTML Report Box api on ${server.url}`);
 console.log(`[dev]   data dir : ${DATA_DIR}`);
 console.log(`[dev]   spa      : ${spa ? webIndexPath : "placeholder (packages/web/index.html missing)"}`);
-console.log(`[dev]   dev users: x-dev-user: alice | bob | admin`);
+console.log(
+  GOOGLE_CLIENT_ID
+    ? `[dev]   auth     : google (client ${GOOGLE_CLIENT_ID.slice(0, 12)}…, admins: ${ADMIN_EMAILS.join(", ") || "none"})`
+    : `[dev]   auth     : dev users via x-dev-user: alice | bob | admin`,
+);
 console.log(`[dev]   scanner  : @hrb/scanner (StubDomainReputation) + yauzl zip extractor`);
 console.log(`[dev]   mcp      : POST ${BASE_URL}/mcp (no API key in dev)`);

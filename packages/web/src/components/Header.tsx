@@ -1,16 +1,47 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { useApp, useSession } from "../app-context.tsx";
-import { DevAuthProvider } from "../lib/auth.ts";
+import { DevAuthProvider, GoogleAuthProvider } from "../lib/auth.ts";
 import { applyTheme, getEffectiveTheme, nextTheme } from "../lib/theme.ts";
 import type { Theme } from "../lib/theme.ts";
 import { Button } from "./Button.tsx";
+import { GoogleSignInButton } from "./GoogleSignInButton.tsx";
 import { BrandMark, Icon } from "./Icon.tsx";
 import { Modal } from "./Modal.tsx";
 import { SearchInput } from "./SearchInput.tsx";
 
 export function LoginModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { auth } = useApp();
+  const session = useSession();
+  const googleAuth = auth instanceof GoogleAuthProvider ? auth : null;
+
+  // Close once the GIS flow (or dev login) lands a session.
+  useEffect(() => {
+    if (open && session) onClose();
+  }, [open, session, onClose]);
+
+  if (googleAuth) {
+    return (
+      <Modal
+        open={open}
+        title="ログイン / 新規登録"
+        onClose={onClose}
+        footer={
+          <Button variant="ghost" onClick={onClose}>
+            キャンセル
+          </Button>
+        }
+      >
+        <p>
+          Google アカウントでログインしてください。
+          <br />
+          初めての方も、そのままアカウントが作成されます。
+        </p>
+        {open && <GoogleSignInButton auth={googleAuth} />}
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       open={open}
@@ -115,7 +146,11 @@ export function Header() {
                 onClick={() => setMenuOpen((v) => !v)}
               >
                 <span className="hrb-avatar" aria-hidden="true">
-                  {session.name.slice(0, 1).toUpperCase()}
+                  {session.picture ? (
+                    <img src={session.picture} alt="" referrerPolicy="no-referrer" />
+                  ) : (
+                    session.name.slice(0, 1).toUpperCase()
+                  )}
                 </span>
                 <span className="hrb-usermenu__name">{session.name}</span>
                 <span className="hrb-usermenu__caret" aria-hidden="true">
@@ -124,6 +159,13 @@ export function Header() {
               </button>
               {menuOpen && (
                 <div className="hrb-usermenu__dropdown" role="menu">
+                  {session.email && (
+                    <div className="hrb-usermenu__identity">
+                      <div className="hrb-usermenu__identity-name">{session.name}</div>
+                      <div className="hrb-usermenu__identity-email">{session.email}</div>
+                      <hr className="hrb-usermenu__divider" />
+                    </div>
+                  )}
                   {devAuth && (
                     <div className="hrb-usermenu__section">
                       <div className="hrb-usermenu__section-title">devユーザー切替</div>
