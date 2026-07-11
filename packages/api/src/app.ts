@@ -358,5 +358,18 @@ export function createApp(ctx: AppContext): AppType {
   app.put("/admin/users/:username/admin", (c) => setAdmin(c, c.req.param("username"), true));
   app.delete("/admin/users/:username/admin", (c) => setAdmin(c, c.req.param("username"), false));
 
+  // Account deletion cascades into the user's reports (sub resolved first so a
+  // half-failed cascade can be retried while the account still exists).
+  app.delete("/admin/users/:username", async (c) => {
+    const username = c.req.param("username");
+    const me = mustUser(c);
+    const sub = await ctx.userAdmin.getUserSub(username);
+    if (sub === null) throw new DomainError("not_found", "user not found");
+    if (sub === me.sub) throw new DomainError("bad_request", "cannot delete your own account");
+    const deletedReports = await ctx.service.adminDeleteByOwner(me, sub);
+    await ctx.userAdmin.deleteUser(username);
+    return c.json({ ok: true as const, deletedReports });
+  });
+
   return app;
 }

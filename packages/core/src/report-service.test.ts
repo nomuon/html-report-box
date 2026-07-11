@@ -194,6 +194,21 @@ describe("report lifecycle", () => {
     await expectDomainError(ctx.service.get(report.id), "not_found");
   });
 
+  test("adminDeleteByOwner purges every report of the owner and only theirs", async () => {
+    await uploadPublished(alice, { title: "Alice公開" }, html("a1", "アリスの公開本文"));
+    const { report: priv } = await upload(alice, { title: "Alice非公開" }, html("a2", "アリスの非公開本文"));
+    const { report: kept } = await uploadPublished(bob, { title: "Bob残留" }, html("b", "ボブの本文"));
+
+    const deleted = await ctx.service.adminDeleteByOwner(admin, alice.sub);
+    expect(deleted).toBe(2);
+    expect((await ctx.service.listMine(alice)).items).toHaveLength(0);
+    await expectDomainError(ctx.service.get(priv.id, admin), "not_found");
+    expect(await ctx.service.search("アリス")).toHaveLength(0);
+    expect((await ctx.service.get(kept.id)).report.id).toBe(kept.id);
+
+    await expectDomainError(ctx.service.adminDeleteByOwner(alice, bob.sub), "forbidden");
+  });
+
   test("empty description is auto-filled from meta description at complete", async () => {
     const page = `<!doctype html><html><head><title>t</title><meta name="description" content="自動抽出された説明"></head><body>x</body></html>`;
     const { report } = await upload(alice, { title: "説明なしレポート" }, page);

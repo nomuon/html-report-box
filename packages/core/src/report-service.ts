@@ -377,6 +377,29 @@ export class ReportService {
   async delete(user: AuthUser, id: string): Promise<void> {
     const meta = await this.mustGet(id);
     this.assertOwnerOrAdmin(user, meta);
+    await this.purge(id);
+  }
+
+  /**
+   * Admin: deletes every report owned by ownerSub (user-deletion cascade).
+   * Returns the number of deleted reports.
+   */
+  async adminDeleteByOwner(user: AuthUser, ownerSub: string): Promise<number> {
+    this.assertAdmin(user);
+    let deleted = 0;
+    // purge() removes items from the listing, so always re-fetch the first page.
+    for (;;) {
+      const page = await this.repo.listByOwner(ownerSub, { limit: 100 });
+      if (page.items.length === 0) return deleted;
+      for (const meta of page.items) {
+        await this.purge(meta.id);
+        deleted += 1;
+      }
+    }
+  }
+
+  /** Removes index entries, stored objects, pending staging and META for id. */
+  private async purge(id: string): Promise<void> {
     await this.removeFromIndex(id);
     await this.storage.deleteContentPrefix(`reports/${id}/`);
     await this.storage.deleteContentPrefix(`sources/${id}/`);

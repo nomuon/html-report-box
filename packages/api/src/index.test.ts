@@ -660,3 +660,39 @@ test("admin user management: list, grant, revoke, unknown user 404", async () =>
   expect(unknown.status).toBe(404);
   expect(unknown.json.error.code).toBe("not_found");
 });
+
+test("admin user deletion: cascades into owned reports", async () => {
+  const env = makeEnv();
+  const kept = await uploadPublished(env, "bob", "Bob Keeps This");
+  const gone1 = await uploadPublished(env, "alice", "Alice Public");
+  const gone2 = await upload(env, "alice", "Alice Private");
+
+  const res = await call(env.app, "DELETE", "/admin/users/alice", { user: "admin" });
+  expect(res.status).toBe(200);
+  expect(res.json).toEqual({ ok: true, deletedReports: 2 });
+
+  const users = await call(env.app, "GET", "/admin/users", { user: "admin" });
+  expect(users.json.users.map((u: any) => u.username).sort()).toEqual(["admin", "bob"]);
+
+  for (const id of [gone1.id, gone2.id]) {
+    const detail = await call(env.app, "GET", `/reports/${id}`, { user: "admin" });
+    expect(detail.status).toBe(404);
+  }
+  const list = await call(env.app, "GET", "/reports");
+  expect(list.json.reports.map((r: any) => r.id)).toEqual([kept.id]);
+  const search = await call(env.app, "GET", "/search?q=Alice");
+  expect(search.json.results).toEqual([]);
+});
+
+test("admin user deletion: guards (self 400, unknown 404, non-admin 403)", async () => {
+  const env = makeEnv();
+  const self = await call(env.app, "DELETE", "/admin/users/admin", { user: "admin" });
+  expect(self.status).toBe(400);
+  expect(self.json.error.code).toBe("bad_request");
+
+  const unknown = await call(env.app, "DELETE", "/admin/users/mallory", { user: "admin" });
+  expect(unknown.status).toBe(404);
+
+  const forbidden = await call(env.app, "DELETE", "/admin/users/bob", { user: "alice" });
+  expect(forbidden.status).toBe(403);
+});

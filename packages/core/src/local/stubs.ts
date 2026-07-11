@@ -4,6 +4,7 @@
  * @hrb/scanner in S2.5). Local-only module.
  */
 import type { AdminUser } from "@hrb/shared";
+import { DomainError } from "../errors.ts";
 import type {
   CdnInvalidator,
   DomainReputation,
@@ -45,6 +46,17 @@ export class LocalUserAdmin implements UserAdmin {
       throw new Error(`unknown user: ${username}`);
     }
     this.adminFlags.set(username, isAdmin);
+  }
+
+  async getUserSub(username: string): Promise<string | null> {
+    if (!this.adminFlags.has(username)) return null;
+    return DEV_USERS[username]?.sub ?? null;
+  }
+
+  async deleteUser(username: string): Promise<void> {
+    if (!this.adminFlags.delete(username)) {
+      throw new DomainError("not_found", `user ${username} does not exist`);
+    }
   }
 }
 

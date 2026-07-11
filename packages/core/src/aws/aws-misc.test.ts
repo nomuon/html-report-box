@@ -138,6 +138,31 @@ describe("CognitoUserAdmin", () => {
     const err = await admin.setAdmin("ghost", true).catch((e) => e);
     expect((err as DomainError).code).toBe("not_found");
   });
+
+  test("getUserSub resolves the sub attribute, null for unknown users", async () => {
+    const client = new FakeClient().on("AdminGetUserCommand", (input) => {
+      if (input.Username !== "alice") throw namedError("UserNotFoundException");
+      return { UserAttributes: [{ Name: "sub", Value: "sub-alice" }] };
+    });
+    const admin = new CognitoUserAdmin({ client, userPoolId: "pool-1" });
+    expect(await admin.getUserSub("alice")).toBe("sub-alice");
+    expect(await admin.getUserSub("ghost")).toBeNull();
+  });
+
+  test("deleteUser deletes the account, unknown user maps to not_found", async () => {
+    const client = new FakeClient().on("AdminDeleteUserCommand", (input) => {
+      if (input.Username === "ghost") throw namedError("UserNotFoundException");
+      return {};
+    });
+    const admin = new CognitoUserAdmin({ client, userPoolId: "pool-1" });
+    await admin.deleteUser("alice");
+    expect(client.inputsOf("AdminDeleteUserCommand")[0]).toEqual({
+      UserPoolId: "pool-1",
+      Username: "alice",
+    });
+    const err = await admin.deleteUser("ghost").catch((e) => e);
+    expect((err as DomainError).code).toBe("not_found");
+  });
 });
 
 // =====================

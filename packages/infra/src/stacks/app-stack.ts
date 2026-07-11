@@ -108,7 +108,8 @@ export class HrbAppStack extends Stack {
     props.contentBucket.grantRead(this.mcpFunction);
     props.stagingBucket.grantRead(this.mcpFunction); // domain blocklist JSON
 
-    // Cognito user administration (admin list users / toggle admin group).
+    // Cognito user administration (admin list users / toggle admin group /
+    // delete account).
     this.apiFunction.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [
@@ -116,6 +117,8 @@ export class HrbAppStack extends Stack {
           "cognito-idp:AdminListGroupsForUser",
           "cognito-idp:AdminAddUserToGroup",
           "cognito-idp:AdminRemoveUserFromGroup",
+          "cognito-idp:AdminGetUser",
+          "cognito-idp:AdminDeleteUser",
         ],
         resources: [props.userPool.userPoolArn],
       }),

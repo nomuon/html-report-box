@@ -349,3 +349,11 @@ export type AdminListUsersResponse = z.infer<typeof AdminListUsersResponseSchema
 // PUT /admin/users/:username/admin — grant / DELETE — revoke
 export const AdminSetAdminResponseSchema = OkResponseSchema;
 export type AdminSetAdminResponse = z.infer<typeof AdminSetAdminResponseSchema>;
+
+// DELETE /admin/users/:username — delete the account + cascade-delete their reports
+export const AdminDeleteUserResponseSchema = z.object({
+  ok: z.literal(true),
+  /** レポート巻き添え削除の件数（UI のトースト表示用） */
+  deletedReports: z.number().int().nonnegative(),
+});
+export type AdminDeleteUserResponse = z.infer<typeof AdminDeleteUserResponseSchema>;

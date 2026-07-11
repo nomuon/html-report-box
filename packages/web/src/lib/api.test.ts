@@ -80,6 +80,15 @@ describe("ApiClient", () => {
     expect(calls[0]?.url).toBe("/api/admin/users/bob/admin");
   });
 
+  test("adminDeleteUser targets the account itself (username encoded)", async () => {
+    const { calls, fetchFn } = mockFetch(200, { ok: true, deletedReports: 3 });
+    const client = new ApiClient({ fetchFn });
+    const res = await client.adminDeleteUser("bob@corp");
+    expect(calls[0]?.method).toBe("DELETE");
+    expect(calls[0]?.url).toBe(`/api/admin/users/${encodeURIComponent("bob@corp")}`);
+    expect(res.deletedReports).toBe(3);
+  });
+
   test("maps {error:{code,message}} to ApiError with status", async () => {
     const { fetchFn } = mockFetch(403, {
       error: { code: "forbidden", message: "admin privileges required" },

@@ -1214,6 +1214,8 @@ exports[`template snapshots HrbAppStack 1`] = `
                 "cognito-idp:AdminListGroupsForUser",
                 "cognito-idp:AdminAddUserToGroup",
                 "cognito-idp:AdminRemoveUserFromGroup",
+                "cognito-idp:AdminGetUser",
+                "cognito-idp:AdminDeleteUser",
               ],
               "Effect": "Allow",
               "Resource": {

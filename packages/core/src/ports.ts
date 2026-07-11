@@ -132,6 +132,10 @@ export interface CdnInvalidator {
 export interface UserAdmin {
   listUsers(opts?: PageOptions): Promise<Page<AdminUser>>;
   setAdmin(username: string, isAdmin: boolean): Promise<void>;
+  /** Stable subject id (= ReportMeta.ownerSub) for the user, or null if unknown. */
+  getUserSub(username: string): Promise<string | null>;
+  /** Deletes the account. Throws DomainError("not_found") for unknown users. */
+  deleteUser(username: string): Promise<void>;
 }
 
 // ---- Security scanner (implemented by @hrb/scanner in S2.5) ----

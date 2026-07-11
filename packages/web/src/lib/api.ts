@@ -8,6 +8,7 @@ import type {
   AdminListFlagsResponse,
   AdminListFlaggedResponse,
   AdminListReportsResponse,
+  AdminDeleteUserResponse,
   AdminListUsersResponse,
   AdminReportActionResponse,
   CompleteReportResponse,
@@ -222,5 +223,9 @@ export class ApiClient {
       isAdmin ? "PUT" : "DELETE",
       `/admin/users/${encodeURIComponent(username)}/admin`,
     );
+  }
+
+  adminDeleteUser(username: string): Promise<AdminDeleteUserResponse> {
+    return this.request("DELETE", `/admin/users/${encodeURIComponent(username)}`);
   }
 }

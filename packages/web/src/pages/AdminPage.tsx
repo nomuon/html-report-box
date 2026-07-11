@@ -19,6 +19,7 @@ type Tab = "flagged" | "all" | "users";
 type Confirm =
   | { kind: "takedown" | "clear-flags"; report: AdminReport }
   | { kind: "set-admin"; user: AdminUser; isAdmin: boolean }
+  | { kind: "delete-user"; user: AdminUser }
   | null;
 
 const GENERIC_ERROR = "エラーが発生しました。時間をおいて再試行してください";
@@ -239,6 +240,7 @@ function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
 
 function UsersTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
   const { api } = useApp();
+  const session = useSession();
   const query = useQuery({
     queryKey: ["admin-users"],
     queryFn: () => api.adminListUsers({ limit: 100 }),
@@ -267,12 +269,25 @@ function UsersTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
               <td>{u.email ?? "-"}</td>
               <td>{u.isAdmin ? <span className="hrb-chip hrb-chip--kind">admin</span> : "-"}</td>
               <td>
-                <Button
-                  variant={u.isAdmin ? "danger" : "secondary"}
-                  onClick={() => onConfirm({ kind: "set-admin", user: u, isAdmin: !u.isAdmin })}
-                >
-                  {u.isAdmin ? "admin 剥奪" : "admin 付与"}
-                </Button>
+                <div className="hrb-row-actions">
+                  <Button
+                    variant={u.isAdmin ? "danger" : "secondary"}
+                    onClick={() => onConfirm({ kind: "set-admin", user: u, isAdmin: !u.isAdmin })}
+                  >
+                    {u.isAdmin ? "admin 剥奪" : "admin 付与"}
+                  </Button>
+                  {u.username === session?.name ? (
+                    <span className="hrb-tip" data-tip="自分自身のアカウントは削除できません" tabIndex={0}>
+                      <Button variant="ghost" disabled>
+                        削除
+                      </Button>
+                    </span>
+                  ) : (
+                    <Button variant="danger" onClick={() => onConfirm({ kind: "delete-user", user: u })}>
+                      削除
+                    </Button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}
@@ -305,12 +320,18 @@ export function AdminPage() {
         case "set-admin":
           await api.adminSetAdmin(c.user.username, c.isAdmin);
           return "権限を更新しました";
+        case "delete-user": {
+          const res = await api.adminDeleteUser(c.user.username);
+          return res.deletedReports > 0
+            ? `ユーザーを削除しました（所有レポート ${res.deletedReports} 件も削除）`
+            : "ユーザーを削除しました";
+        }
       }
     },
     onSuccess: (message, c) => {
       toast.push("success", message);
-      if (c.kind === "set-admin") void qc.invalidateQueries({ queryKey: ["admin-users"] });
-      else invalidate();
+      void qc.invalidateQueries({ queryKey: ["admin-users"] });
+      if (c.kind !== "set-admin") invalidate();
       setConfirm(null);
     },
     onError: (err) => {
@@ -346,6 +367,12 @@ export function AdminPage() {
           title: "権限を変更",
           body: `${c.user.name ?? c.user.username} の admin 権限を${c.isAdmin ? "付与" : "剥奪"}しますか？`,
           label: c.isAdmin ? "付与する" : "剥奪する",
+        };
+      case "delete-user":
+        return {
+          title: "ユーザーを削除",
+          body: `${c.user.name ?? c.user.username}（${c.user.email ?? c.user.username}）のアカウントを削除します。このユーザーが所有するレポートもすべて削除され、共有 URL は無効になります。この操作は取り消せません。よろしいですか？`,
+          label: "削除する",
         };
     }
   };

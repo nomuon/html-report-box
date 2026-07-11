@@ -1,12 +1,15 @@
 /**
  * CognitoUserAdmin — UserAdmin over the Cognito user pool.
  * ListUsers + AdminListGroupsForUser (per user, page-sized) for the admin
- * flag; AdminAddUserToGroup / AdminRemoveUserFromGroup to toggle it.
+ * flag; AdminAddUserToGroup / AdminRemoveUserFromGroup to toggle it;
+ * AdminGetUser to resolve the sub; AdminDeleteUser to delete the account.
  * Matches the IAM actions granted to the api Lambda in HrbAppStack.
  * Portable (Node 22 / Lambda); no Bun-only APIs.
  */
 import {
   AdminAddUserToGroupCommand,
+  AdminDeleteUserCommand,
+  AdminGetUserCommand,
   AdminListGroupsForUserCommand,
   AdminRemoveUserFromGroupCommand,
   ListUsersCommand,
@@ -95,6 +98,32 @@ export class CognitoUserAdmin implements UserAdmin {
     try {
       await this.client.send(
         isAdmin ? new AdminAddUserToGroupCommand(input) : new AdminRemoveUserFromGroupCommand(input),
+      );
+    } catch (err) {
+      if (isUserNotFound(err)) {
+        throw new DomainError("not_found", `user ${username} does not exist`);
+      }
+      throw err;
+    }
+  }
+
+  async getUserSub(username: string): Promise<string | null> {
+    try {
+      const res = await this.client.send(
+        new AdminGetUserCommand({ UserPoolId: this.userPoolId, Username: username }),
+      );
+      const attrs = (res?.UserAttributes ?? []) as CognitoAttribute[];
+      return attrs.find((a) => a.Name === "sub")?.Value ?? null;
+    } catch (err) {
+      if (isUserNotFound(err)) return null;
+      throw err;
+    }
+  }
+
+  async deleteUser(username: string): Promise<void> {
+    try {
+      await this.client.send(
+        new AdminDeleteUserCommand({ UserPoolId: this.userPoolId, Username: username }),
       );
     } catch (err) {
       if (isUserNotFound(err)) {
