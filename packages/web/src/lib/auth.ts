@@ -25,6 +25,11 @@ export interface StorageLike {
 
 export interface AuthProvider {
   readonly mode: "dev" | "cognito";
+  /**
+   * Must return a referentially stable value until the session changes —
+   * consumed as a useSyncExternalStore snapshot (a fresh object per call
+   * would re-render infinitely).
+   */
   getSession(): AuthSession | null;
   /** Headers to attach to every /api request. */
   getHeaders(): Record<string, string>;
@@ -68,6 +73,7 @@ export class DevAuthProvider extends BaseAuthProvider {
   readonly users: string[];
   private readonly storage: StorageLike;
   private current: string | null;
+  private session: AuthSession | null;
 
   constructor(users: string[], storage?: StorageLike) {
     super();
@@ -76,11 +82,16 @@ export class DevAuthProvider extends BaseAuthProvider {
     const stored = this.storage.getItem(DEV_USER_STORAGE_KEY);
     // Default: first dev user logged in (frictionless local dev).
     this.current = stored && users.includes(stored) ? stored : (users[0] ?? null);
+    this.session = this.buildSession();
+  }
+
+  private buildSession(): AuthSession | null {
+    if (!this.current) return null;
+    return { name: this.current, isAdmin: this.current === "admin" };
   }
 
   getSession(): AuthSession | null {
-    if (!this.current) return null;
-    return { name: this.current, isAdmin: this.current === "admin" };
+    return this.session;
   }
 
   getHeaders(): Record<string, string> {
@@ -90,6 +101,7 @@ export class DevAuthProvider extends BaseAuthProvider {
   setUser(name: string | null): void {
     if (name !== null && !this.users.includes(name)) return;
     this.current = name;
+    this.session = this.buildSession();
     if (name === null) this.storage.removeItem(DEV_USER_STORAGE_KEY);
     else this.storage.setItem(DEV_USER_STORAGE_KEY, name);
     this.notify();

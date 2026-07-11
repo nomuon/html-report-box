@@ -49,6 +49,16 @@ describe("DevAuthProvider", () => {
     expect(notified).toBe(1);
   });
 
+  test("getSession is referentially stable until the user changes (useSyncExternalStore snapshot)", () => {
+    const auth = new DevAuthProvider(USERS, memStorage());
+    const first = auth.getSession();
+    expect(auth.getSession()).toBe(first);
+    auth.setUser("bob");
+    const second = auth.getSession();
+    expect(second).not.toBe(first);
+    expect(auth.getSession()).toBe(second);
+  });
+
   test("logout clears the session and headers; login restores the default", () => {
     const auth = new DevAuthProvider(USERS, memStorage());
     auth.logout();
