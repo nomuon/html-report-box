@@ -1336,6 +1336,15 @@ a.hrb-table__title:hover {
   color: var(--status-rejected-fg);
 }
 
+.hrb-editor-notice {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  color: var(--status-pending-fg);
+  background: var(--status-pending-bg);
+  font-size: var(--text-sm);
+}
+
 .hrb-editor-rejected {
   margin-top: var(--space-4);
   padding: var(--space-4);

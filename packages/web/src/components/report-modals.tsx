@@ -115,9 +115,14 @@ export function EditHtmlModal({
     queryKey: ["report-source", report.id],
     queryFn: () => api.getReportSource(report.id),
     enabled: open,
+    retry: (count, err) => !(isApiError(err) && err.status < 500) && count < 3,
   });
+  // 原本が失われたレポート（拒否後など）は空のエディタから書き直せる
+  const sourceMissing =
+    source.isError && isApiError(source.error) && source.error.code === "not_found";
+  const editable = source.isSuccess || sourceMissing;
   const value = draft ?? source.data?.html ?? "";
-  const dirty = draft !== null && draft !== source.data?.html;
+  const dirty = draft !== null && draft !== (source.data?.html ?? "");
 
   const save = async () => {
     if (!value.trim()) return;
@@ -172,13 +177,19 @@ export function EditHtmlModal({
       }
     >
       {source.isLoading && <p className="hrb-loading">読み込み中…</p>}
-      {source.isError && (
+      {source.isError && !sourceMissing && (
         <p className="hrb-editor-error">
           ソースを取得できませんでした。
           {isApiError(source.error) ? ` ${source.error.message}` : ""}
         </p>
       )}
-      {source.isSuccess && (
+      {sourceMissing && (
+        <div className="hrb-editor-notice" role="status">
+          <strong>保存済みの原本が見つかりません。</strong>
+          新しい HTML を入力して保存すると、この内容でレポートを置き換えます
+        </div>
+      )}
+      {editable && (
         <>
           <textarea
             className="hrb-input hrb-editor"

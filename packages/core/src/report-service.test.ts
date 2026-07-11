@@ -474,3 +474,48 @@ describe("persistence", () => {
     expect(hits).toHaveLength(1);
   });
 });
+
+describe("legacy source recovery (sources/ 導入前のデータ)", () => {
+  /** sources/ 導入前の公開レポートを再現: 原本オブジェクトだけを消す */
+  async function publishLegacy(title: string, body: string) {
+    const { report } = await uploadPublished(alice, { title }, html(title, body));
+    await ctx.storage.deleteContentPrefix(`sources/${report.id}/`);
+    return report;
+  }
+
+  test("getSource recovers from the public copy and backfills sources/", async () => {
+    const report = await publishLegacy("旧レポート", "レガシー本文");
+    const source = await ctx.service.getSource(alice, report.id);
+    expect(source.html).toContain("レガシー本文");
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).not.toBeNull();
+  });
+
+  test("publish/unpublish keep working: the source is rescued before the public copy is deleted", async () => {
+    const report = await publishLegacy("旧公開", "非公開化テスト");
+    const hidden = await ctx.service.unpublish(alice, report.id);
+    expect(hidden.status).toBe("private");
+    expect((await ctx.service.getSource(alice, report.id)).html).toContain("非公開化テスト");
+    expect((await ctx.service.publish(alice, report.id)).report.status).toBe("published");
+  });
+
+  test("a public copy that does not match META's sha256 is not recovered", async () => {
+    const report = await publishLegacy("改ざん検知", "本物の本文");
+    await ctx.storage.putContentObject(
+      `reports/${report.id}/index.html`,
+      enc.encode("<html>tampered</html>"),
+      "text/html; charset=utf-8",
+    );
+    await expectDomainError(ctx.service.getSource(alice, report.id), "not_found");
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).toBeNull();
+  });
+
+  test("editContent still works for a report whose source is gone (rewrite from scratch)", async () => {
+    const report = await publishLegacy("原本消失", "旧本文");
+    // 公開コピーも失われた最悪ケース（旧 private 相当）
+    await ctx.storage.deleteContentPrefix(`reports/${report.id}/`);
+    await expectDomainError(ctx.service.getSource(alice, report.id), "not_found");
+    const edited = await ctx.service.editContent(alice, report.id, html("書き直し", "新本文"));
+    expect(edited.report.status).toBe("published");
+    expect((await ctx.service.getSource(alice, report.id)).html).toContain("新本文");
+  });
+});

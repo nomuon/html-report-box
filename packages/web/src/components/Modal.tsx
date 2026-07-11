@@ -16,11 +16,15 @@ export interface ModalProps {
 
 export function Modal({ open, title, onClose, children, footer, closeOnOverlay = true, wide = false }: ModalProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  // 呼び出し側は毎レンダー新しいクロージャを渡してくる。依存配列に入れると
+  // 入力のたびにエフェクトが再実行されフォーカスが奪われるため ref で保持する。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     window.addEventListener("keydown", onKey);
     // 簡易フォーカストラップ: 開時に最初のフォーカス可能要素へ
@@ -29,7 +33,7 @@ export function Modal({ open, title, onClose, children, footer, closeOnOverlay =
     );
     el?.focus();
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   return (

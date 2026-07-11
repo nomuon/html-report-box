@@ -272,8 +272,7 @@ export class ReportService {
         "report was rejected by the security scan; upload a fixed version first",
       );
     }
-    const data =
-      meta.sha256 !== undefined ? await this.storage.getContentObject(this.sourceKey(id)) : null;
+    const data = await this.loadSource(meta);
     if (!data) {
       throw new DomainError("conflict", "report has no publishable content; upload it first");
     }
@@ -297,6 +296,9 @@ export class ReportService {
     if (meta.status !== "published") {
       throw new DomainError("conflict", `report is ${meta.status}, not published`);
     }
+    // Legacy reports: the public copy may be the only remaining bytes —
+    // rescue it into sources/ before it is deleted below.
+    await this.loadSource(meta);
     await this.removeFromIndex(id);
     await this.storage.deleteContentPrefix(`reports/${id}/`);
     meta.status = "private";
@@ -316,8 +318,7 @@ export class ReportService {
     if (meta.status === "takedown" && !user.isAdmin) {
       throw new DomainError("forbidden", "report was taken down by an administrator");
     }
-    const data =
-      meta.sha256 !== undefined ? await this.storage.getContentObject(this.sourceKey(id)) : null;
+    const data = await this.loadSource(meta);
     if (!data) throw new DomainError("not_found", "report has no stored content");
     if (meta.kind === "html") {
       return { kind: "html", html: new TextDecoder().decode(data) };
@@ -547,6 +548,29 @@ export class ReportService {
   /** Storage key of the canonical uploaded bytes (kept while the report exists). */
   private sourceKey(id: string): string {
     return `sources/${id}/current`;
+  }
+
+  /**
+   * Canonical uploaded bytes for editing / (re-)publishing. Reports stored
+   * before the sources/ prefix existed only have the public copy — recover
+   * it (html kind: identical bytes, verified against META's sha256) and
+   * backfill sources/ so subsequent reads and unpublish keep working.
+   */
+  private async loadSource(meta: ReportMeta): Promise<Uint8Array | null> {
+    if (meta.sha256 === undefined) return null;
+    const stored = await this.storage.getContentObject(this.sourceKey(meta.id));
+    if (stored) return stored;
+    // Legacy zip originals are not reconstructible from the extracted files.
+    if (meta.kind !== "html") return null;
+    const published = await this.storage.getContentObject(`reports/${meta.id}/index.html`);
+    if (!published) return null;
+    if (createHash("sha256").update(published).digest("hex") !== meta.sha256) return null;
+    await this.storage.putContentObject(
+      this.sourceKey(meta.id),
+      published,
+      "text/html; charset=utf-8",
+    );
+    return published;
   }
 
   /**
