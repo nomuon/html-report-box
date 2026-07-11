@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Icon } from "./Icon.tsx";
 
 export interface SearchInputProps {
   initialValue?: string;
@@ -13,7 +14,7 @@ export function SearchInput({ initialValue = "", onSearch, placeholder = "レポ
   return (
     <div className="hrb-search">
       <span className="hrb-search__icon" aria-hidden="true">
-        🔍
+        <Icon name="search" size={16} />
       </span>
       <input
         type="search"
@@ -37,7 +38,7 @@ export function SearchInput({ initialValue = "", onSearch, placeholder = "レポ
           aria-label="クリア"
           onClick={() => setValue("")}
         >
-          ✕
+          <Icon name="x" size={14} />
         </button>
       )}
     </div>

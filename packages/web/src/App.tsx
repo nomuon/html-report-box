@@ -7,6 +7,7 @@ import { AppProvider } from "./app-context.tsx";
 import { Header } from "./components/Header.tsx";
 import { ToastProvider } from "./components/Toast.tsx";
 import { EmptyState } from "./components/EmptyState.tsx";
+import { Icon } from "./components/Icon.tsx";
 import { AdminPage } from "./pages/AdminPage.tsx";
 import { ListPage } from "./pages/ListPage.tsx";
 import { MinePage } from "./pages/MinePage.tsx";
@@ -31,7 +32,10 @@ function Shell() {
           <Route path="/reports/:id" element={<ReportDetailPage />} />
           <Route path="/mine" element={<MinePage />} />
           <Route path="/admin" element={<AdminPage />} />
-          <Route path="*" element={<EmptyState icon="🚫" title="ページが見つかりません" />} />
+          <Route
+            path="*"
+            element={<EmptyState icon={<Icon name="ban" size={30} />} title="ページが見つかりません" />}
+          />
         </Routes>
       </main>
     </>

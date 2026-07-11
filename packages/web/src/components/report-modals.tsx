@@ -11,6 +11,7 @@ import { uploadToPresigned } from "../lib/upload.ts";
 import { DROPZONE_INITIAL, dropzoneReducer, validateFiles } from "../state/dropzone.ts";
 import { Button } from "./Button.tsx";
 import { DropZone } from "./DropZone.tsx";
+import { Icon } from "./Icon.tsx";
 import { Modal } from "./Modal.tsx";
 import { useToast } from "./Toast.tsx";
 
@@ -215,7 +216,9 @@ export function OverwriteReportModal({
     state.phase === "done" ? (
       state.report.status === "pending_review" ? (
         <div className="hrb-upload-result hrb-upload-result--warn">
-          <div className="hrb-upload-result__icon" aria-hidden="true">🕒</div>
+          <div className="hrb-upload-result__icon" aria-hidden="true">
+            <Icon name="clock" size={28} />
+          </div>
           <h2 className="hrb-upload-result__title hrb-upload-result__title--pending">
             アップロードを受け付けました — 管理者の承認待ちです
           </h2>
@@ -225,7 +228,9 @@ export function OverwriteReportModal({
         </div>
       ) : (
         <div className="hrb-upload-result">
-          <div className="hrb-upload-result__icon" aria-hidden="true">✅</div>
+          <div className="hrb-upload-result__icon" aria-hidden="true">
+            <Icon name="check-circle" size={28} />
+          </div>
           <h2 className="hrb-upload-result__title">上書きが完了しました</h2>
           <div className="hrb-upload-result__actions">
             <Button onClick={close}>閉じる</Button>
@@ -234,7 +239,9 @@ export function OverwriteReportModal({
       )
     ) : state.phase === "rejected" ? (
       <div className="hrb-upload-result hrb-upload-result--rejected">
-        <div className="hrb-upload-result__icon" aria-hidden="true">⛔</div>
+        <div className="hrb-upload-result__icon" aria-hidden="true">
+          <Icon name="ban" size={28} />
+        </div>
         <h2 className="hrb-upload-result__title hrb-upload-result__title--danger">
           アップロードを拒否しました
         </h2>

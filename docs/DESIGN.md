@@ -22,24 +22,27 @@
 ```css
 :root {
   /* ---- カラー: ライト ---- */
-  --color-bg: #f6f7f9;            /* ページ背景 */
+  --color-bg: #f3f5f8;            /* ページ背景 */
   --color-surface: #ffffff;       /* カード・ヘッダー・モーダル */
-  --color-surface-2: #eef0f3;     /* テーブルヘッダ、hover行、コード背景 */
-  --color-border: #d9dde3;
-  --color-border-strong: #b9c0c9;
-  --color-text: #1a2027;
-  --color-text-muted: #5b6675;
-  --color-text-faint: #8a93a0;    /* 注記・placeholder */
-  --color-primary: #2563eb;       /* プライマリボタン・リンク・フォーカス */
-  --color-primary-hover: #1d4ed8;
-  --color-primary-subtle: #e8effd;/* 選択行・dragover 背景 */
-  --color-danger: #dc2626;
-  --color-danger-hover: #b91c1c;
-  --color-danger-subtle: #fdecec;
-  --color-success: #16a34a;
-  --color-success-subtle: #e7f6ec;
-  --color-warning: #b45309;
-  --color-warning-subtle: #fdf3e2;
+  --color-surface-2: #eceff4;     /* hover行、コード背景 */
+  --color-border: #dde2e9;
+  --color-border-strong: #b7c0cc;
+  --color-text: #171e28;
+  --color-text-muted: #56616f;
+  --color-text-faint: #8b95a3;    /* 注記・placeholder */
+  --color-primary: #2b4fc2;       /* 紺藍: プライマリボタン・リンク・フォーカス */
+  --color-primary-hover: #223f9e;
+  --color-primary-subtle: #e9eefb;/* 選択行・dragover 背景 */
+  --color-accent: #0d9488;        /* verdigris: スキャン済み・信頼の演出 */
+  --color-accent-subtle: #e4f5f2;
+  --color-danger: #d63333;
+  --color-danger-hover: #b32323;
+  --color-danger-subtle: #fdeded;
+  --color-success: #178743;
+  --color-success-subtle: #e6f5eb;
+  --color-warning: #a85d0a;
+  --color-warning-subtle: #fdf3e1;
+  --color-content-bg: #ffffff;    /* 記事本文（iframe）面。ライトでは常に白 */
 
   /* ---- status 色（チップ・DropZone 状態で共用） ---- */
   --status-processing-fg: #4f46e5;      /* indigo: 処理中 */
@@ -58,17 +61,18 @@
   /* ---- spacing（4px グリッド） ---- */
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
   --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px;
+  --space-9: 96px;
 
   /* ---- radius ---- */
-  --radius-sm: 6px;    /* チップ・input */
-  --radius-md: 10px;   /* ボタン・カード */
-  --radius-lg: 16px;   /* モーダル・ドロップゾーン */
+  --radius-sm: 8px;    /* ボタン・チップ・input */
+  --radius-md: 12px;   /* カード・テーブルラップ */
+  --radius-lg: 18px;   /* モーダル・ドロップゾーン */
   --radius-full: 999px;
 
   /* ---- shadow ---- */
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06);
-  --shadow-md: 0 4px 12px rgba(16, 24, 40, .10);
-  --shadow-lg: 0 12px 32px rgba(16, 24, 40, .18); /* モーダル・トースト */
+  --shadow-sm: 0 1px 2px rgba(23, 30, 40, .05);
+  --shadow-md: 0 6px 20px rgba(23, 30, 40, .08);
+  --shadow-lg: 0 18px 48px rgba(23, 30, 40, .16); /* モーダル・トースト */
 
   /* ---- typography ---- */
   --font-sans: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "BIZ UDPGothic",
@@ -77,14 +81,15 @@
   --text-xs: 12px;  /* 注記・チップ */
   --text-sm: 13px;  /* テーブル・補助 */
   --text-md: 15px;  /* 本文基準 */
-  --text-lg: 18px;  /* カードタイトル・セクション見出し */
-  --text-xl: 24px;  /* ページタイトル */
-  --leading: 1.6;   /* 日本語向け行間 */
+  --text-lg: 17px;  /* カードタイトル・セクション見出し */
+  --text-xl: 22px;  /* 詳細ページタイトル */
+  --text-2xl: 28px; /* ページタイトル */
+  --leading: 1.65;  /* 日本語向け行間 */
 
   /* ---- その他 ---- */
-  --header-h: 56px;
-  --container-max: 1120px;
-  --transition: 150ms ease;
+  --header-h: 64px;
+  --container-max: 1200px;
+  --transition: 160ms ease;
 }
 ```
 
@@ -143,10 +148,10 @@
 └─────────────────────────────────────────────────────┘
 ```
 
-- ロゴ: テキスト「HTML Report Box」（`--text-lg`, font-weight 700）+ 絵文字 📦。クリックで `/` へ
+- ロゴ: テキスト「HTML Report Box」（`--text-lg`, font-weight 700）+ ブランドマーク SVG（`BrandMark`: 角丸タイル `--color-primary` × 白い盾+チェック）。クリックで `/` へ
 - 検索バー: ヘッダー中央（§3 SearchInput）。Enter で `/search?q=...` へ遷移
 - 「+ アップロード」: プライマリボタン。`/upload` へ（Zoho WorkDrive の右上「New」相当）
-- テーマトグル: アイコンボタン（ライト時 🌙 / ダーク時 ☀️、`aria-label="テーマ切り替え"`）
+- テーマトグル: アイコンボタン（ライト時 moon / ダーク時 sun の SVG アイコン、`aria-label="テーマ切り替え"`）
 - ユーザーメニュー: アバター円（イニシャル 1 文字、`--color-primary-subtle` 背景）+ 名前。クリックでドロップダウン: 「マイレポート」「管理画面（admin のみ）」「ログアウト」。**ローカル dev モード時**（`GET /api/config` の `mode==="local"`）はドロップダウン上部に「devユーザー切替」セクションを出し、alice / bob / admin をラジオ選択（選択値を `X-Dev-User` ヘッダーに載せる。選択は localStorage 永続化）
 - 未ログイン時: ユーザーメニュー位置に「Google でログイン」セカンダリボタン。閲覧・検索は未ログインでも可能。「+ アップロード」押下時は先にログインを促すモーダル
 - モバイル（<720px）: 検索バーはヘッダー下の 2 段目に落とす。テーブルはカード表示に切替（§2.2）
@@ -239,7 +244,7 @@ SoundCloud Artist Studio / Databricks 参照。ページ中央に大型 DropZone
 ### Button
 
 - variant: `primary` / `secondary` / `danger` / `ghost`
-- 共通: height 36px（`size="lg"` は 44px、DropZone 内 browse 等）、padding `0 var(--space-4)`、radius `--radius-md`、font-weight 600、`--text-sm`、transition `background var(--transition)`
+- 共通: height 40px（`size="lg"` は 48px、DropZone 内 browse 等）、padding `0 var(--space-5)`、radius `--radius-sm`、font-weight 600、`--text-sm`、transition `background var(--transition)`
 - primary: bg `--color-primary`、白文字、hover `--color-primary-hover`
 - secondary: bg `--color-surface`、border 1px `--color-border-strong`、文字 `--color-text`、hover bg `--color-surface-2`
 - danger: bg `--color-danger`、白文字、hover `--color-danger-hover`
@@ -248,7 +253,7 @@ SoundCloud Artist Studio / Databricks 参照。ページ中央に大型 DropZone
 
 ### Chip（ステータスチップ）
 
-- inline-flex、height 22px、padding `0 var(--space-2)`、radius `--radius-full`、`--text-xs`、font-weight 600、先頭に 6px の● ドット
+- inline-flex、height 24px、padding `0 var(--space-3)`、radius `--radius-full`、`--text-xs`、font-weight 600、先頭に 6px の● ドット
 - マッピング（ラベルは必ずこの日本語）:
 
 | status | ラベル | fg / bg |
@@ -262,34 +267,35 @@ SoundCloud Artist Studio / Databricks 参照。ページ中央に大型 DropZone
 
 ### Card
 
-- bg `--color-surface`、border 1px `--color-border`、radius `--radius-md`、padding `--space-4`、shadow `--shadow-sm`
+- bg `--color-surface`、border 1px `--color-border`、radius `--radius-md`、padding `--space-5`、shadow `--shadow-sm`
 - クリッカブル時: hover で `--shadow-md` + border `--color-border-strong`、`cursor: pointer`
 
 ### Modal
 
 - オーバーレイ: `rgba(0,0,0,.5)`（ダーク時 `.65`）、クリックで閉じる（destructive 確認中は閉じない）
-- 本体: `--color-surface`、radius `--radius-lg`、shadow `--shadow-lg`、width min(560px, calc(100vw - 32px))、padding `--space-5`。ヘッダー（`--text-lg` 太字 + 右上 ✕ ghost ボタン）/ 本文 / フッター（右寄せボタン行, gap `--space-2`）
+- 本体: `--color-surface`、radius `--radius-lg`、shadow `--shadow-lg`、width min(560px, calc(100vw - 32px))、padding `--space-6`。ヘッダー（`--text-lg` 太字 + 右上 x アイコンボタン）/ 本文 / フッター（右寄せボタン行, gap `--space-3`）
 - 開閉: opacity+scale(.97→1) 150ms。Esc で閉じる。開時に最初のフォーカス可能要素へフォーカス（簡易フォーカストラップ）。`role="dialog" aria-modal="true"`
 
 ### Toast
 
-- 右下固定（bottom/right `--space-5`）、縦積み最大 3 件。width 320px、`--color-surface`、radius `--radius-md`、shadow `--shadow-lg`、左端 3px の色帯（success/danger/info=primary）
-- 構成: アイコン（✓ / ✕ / ℹ）+ メッセージ（`--text-sm`）+ ✕ 閉じる。5 秒で自動消滅（hover 中は停止）。出現は translateY(8px)+fade 150ms
+- 右下固定（bottom/right `--space-6`）、縦積み最大 3 件。width 360px、`--color-surface`、border 1px `--color-border`、radius `--radius-md`、shadow `--shadow-lg`
+- 構成: SVG アイコン（check-circle / x-circle / info、意味色）+ メッセージ（`--text-sm`）+ x 閉じる。5 秒で自動消滅（hover 中は停止）。出現は translateY(8px)+fade 160ms
 - `aria-live="polite"` のコンテナに入れる
 
 ### EmptyState
 
-- 中央寄せ、padding `--space-8` 0。絵文字アイコン（48px）→ 見出し（`--text-lg`, muted）→ 補足（`--text-sm`, faint）→ 任意のアクションボタン
+- 中央寄せ、padding `--space-9` 上下。72px の円（`--color-surface-2`）内に SVG アイコン → 見出し（`--text-lg`, muted）→ 補足（`--text-sm`, faint）→ 任意のアクションボタン
 
 ### SearchInput
 
-- height 36px、radius `--radius-full`、bg `--color-surface-2`（フォーカスで `--color-surface` + border `--color-primary`）、左に 🔍 アイコン、右に ✕ クリアボタン（入力時のみ表示）
+- height 40px、radius `--radius-full`、bg `--color-surface-2`（フォーカスで `--color-surface` + border `--color-primary`）、左に search アイコン（SVG）、右に x クリアボタン（入力時のみ表示）
 - placeholder: 「レポートを検索…」。IME 変換中の Enter（`isComposing`）では検索しない
 
 ### DropZone
 
 - 点線ボーダー 2px dashed `--color-border-strong`、radius `--radius-lg`、bg `--color-surface`、中央寄せ縦積み（docsum/Sprig 式）
-- 内容（idle 時）: 📤 アイコン 40px → 「ここに HTML / ZIP ファイルをドラッグ＆ドロップ」（`--text-md` 太字）→ 「または」（faint）→ 「ファイルを選択」secondary ボタン（`<input type="file" accept=".html,.htm,.zip" hidden>` を発火）
+- 内容（idle 時）: upload-cloud アイコン（64px 円 `--color-primary-subtle`）→ 「ここに HTML / ZIP ファイルをドラッグ＆ドロップ」（`--text-md` 太字）→ 「または」（faint）→ 「ファイルを選択」secondary ボタン（`<input type="file" accept=".html,.htm,.zip" hidden>` を発火）
+- スキャン中: shield-check アイコン（accent 円）+ ゾーン上を verdigris の走査線が縦にスイープ（シグネチャ演出、reduced-motion では停止）
 - キーボード操作: DropZone 自体を `role="button" tabIndex=0` にし Enter/Space で file picker
 - 状態別の見た目は §4.2
 
@@ -369,4 +375,4 @@ idle --(dragenter)--> dragover --(drop/選択)--> [クライアント検証]
 - ステータス→表示のマッピング・チップは `StatusChip` 1 コンポーネントに集約し、一覧/マイレポート/admin/詳細で共用する
 - テーマトグルは FOUC 防止のため、HTML エントリの `<head>` にインラインスクリプトで `localStorage.hrb-theme` を読んで `data-theme` を先付けする
 - CSS はトークン参照のみで書き、生 hex をコンポーネント CSS に書かない
-- アイコンは絵文字で足りる想定（外部アイコンフォント・SVG ライブラリ不要）
+- アイコンは自前のインライン SVG セット（`components/Icon.tsx`、stroke 1.75 / currentColor / 24 viewBox）。絵文字は使用しない。外部アイコンフォント・CDN 依存なし

@@ -8,6 +8,7 @@ import { useApp, useSession } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
 import { KindChip, STATUS_LABELS, StatusChip } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
+import { Icon } from "../components/Icon.tsx";
 import { Modal } from "../components/Modal.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { isApiError } from "../lib/api.ts";
@@ -43,7 +44,7 @@ function QueueTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
 
   if (query.isLoading) return <p className="hrb-loading">読み込み中…</p>;
   if (reports.length === 0)
-    return <EmptyState icon="✅" title="承認待ちのレポートはありません" />;
+    return <EmptyState icon={<Icon name="check-circle" size={30} />} title="承認待ちのレポートはありません" />;
 
   return (
     <div className="hrb-table-wrap">
@@ -165,7 +166,7 @@ function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
 
       {query.isLoading && <p className="hrb-loading">読み込み中…</p>}
       {!query.isLoading && reports.length === 0 && (
-        <EmptyState icon="📭" title="レポートがありません" />
+        <EmptyState icon={<Icon name="inbox" size={30} />} title="レポートがありません" />
       )}
 
       {reports.length > 0 && (
@@ -235,7 +236,8 @@ function UsersTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
   const users = query.data?.users ?? [];
 
   if (query.isLoading) return <p className="hrb-loading">読み込み中…</p>;
-  if (users.length === 0) return <EmptyState icon="👤" title="ユーザーがいません" />;
+  if (users.length === 0)
+    return <EmptyState icon={<Icon name="users" size={30} />} title="ユーザーがいません" />;
 
   return (
     <div className="hrb-table-wrap">
@@ -313,7 +315,7 @@ export function AdminPage() {
   if (!session?.isAdmin) {
     return (
       <div className="hrb-page">
-        <EmptyState icon="🚫" title="権限がありません" />
+        <EmptyState icon={<Icon name="lock" size={30} />} title="権限がありません" />
       </div>
     );
   }

@@ -8,6 +8,7 @@ import { Button } from "../components/Button.tsx";
 import { KindChip, StatusChip } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Highlight } from "../components/Highlight.tsx";
+import { Icon } from "../components/Icon.tsx";
 import { formatDateTime } from "../lib/format.ts";
 
 type ViewMode = "table" | "card";
@@ -106,7 +107,7 @@ function ViewToggle({ view, onChange }: { view: ViewMode; onChange: (v: ViewMode
         aria-label="テーブル表示"
         onClick={() => onChange("table")}
       >
-        ☰
+        <Icon name="rows" size={16} />
       </button>
       <button
         type="button"
@@ -114,7 +115,7 @@ function ViewToggle({ view, onChange }: { view: ViewMode; onChange: (v: ViewMode
         aria-label="カード表示"
         onClick={() => onChange("card")}
       >
-        ▦
+        <Icon name="grid" size={16} />
       </button>
     </div>
   );
@@ -162,9 +163,17 @@ export function ListPage() {
   return (
     <div className="hrb-page">
       <div className="hrb-page__head">
-        <h1 className="hrb-page__title">
-          {isSearch ? `「${q}」の検索結果 ${reports.length}件` : "レポート一覧"}
-        </h1>
+        <div>
+          <h1 className="hrb-page__title">
+            {isSearch ? `「${q}」の検索結果 ${reports.length}件` : "レポート一覧"}
+          </h1>
+          {!isSearch && (
+            <p className="hrb-page__sub">
+              <Icon name="shield-check" size={14} />
+              すべてのレポートは公開前にセキュリティスキャンされています
+            </p>
+          )}
+        </div>
         <ViewToggle view={view} onChange={changeView} />
       </div>
 
@@ -172,10 +181,13 @@ export function ListPage() {
 
       {!loading && reports.length === 0 && (
         isSearch ? (
-          <EmptyState icon="🔍" title={`「${q}」に一致するレポートは見つかりませんでした`} />
+          <EmptyState
+            icon={<Icon name="search" size={30} />}
+            title={`「${q}」に一致するレポートは見つかりませんでした`}
+          />
         ) : (
           <EmptyState
-            icon="📭"
+            icon={<Icon name="inbox" size={30} />}
             title="まだレポートがありません"
             action={<Button onClick={() => navigate("/upload")}>最初のレポートをアップロード</Button>}
           />

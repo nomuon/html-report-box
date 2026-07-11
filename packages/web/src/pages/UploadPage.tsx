@@ -9,6 +9,7 @@ import { CopyUrlRow } from "../components/CopyUrlRow.tsx";
 import { DropZone } from "../components/DropZone.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { LoginModal } from "../components/Header.tsx";
+import { Icon } from "../components/Icon.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { extractHtmlTitle, titleFromFilename } from "../lib/html-title.ts";
 import { uploadToPresigned } from "../lib/upload.ts";
@@ -46,7 +47,7 @@ export function UploadPage() {
     return (
       <div className="hrb-page">
         <EmptyState
-          icon="🔒"
+          icon={<Icon name="lock" size={30} />}
           title="ログインが必要です"
           detail="レポートのアップロードには Google アカウントでのログインが必要です"
           action={<Button onClick={() => setLoginOpen(true)}>Google でログイン</Button>}
@@ -130,7 +131,9 @@ export function UploadPage() {
       state.report.status === "pending_review" ? (
         // verdict=warn → 承認待ち表示（§4.4）
         <div className="hrb-upload-result hrb-upload-result--warn">
-          <div className="hrb-upload-result__icon" aria-hidden="true">🕒</div>
+          <div className="hrb-upload-result__icon" aria-hidden="true">
+            <Icon name="clock" size={28} />
+          </div>
           <h2 className="hrb-upload-result__title hrb-upload-result__title--pending">
             アップロードを受け付けました — 管理者の承認待ちです
           </h2>
@@ -150,7 +153,9 @@ export function UploadPage() {
         </div>
       ) : (
         <div className="hrb-upload-result">
-          <div className="hrb-upload-result__icon" aria-hidden="true">✅</div>
+          <div className="hrb-upload-result__icon" aria-hidden="true">
+            <Icon name="check-circle" size={28} />
+          </div>
           <h2 className="hrb-upload-result__title">アップロードが完了しました</h2>
           <CopyUrlRow url={shareUrl} />
           <div className="hrb-upload-result__actions">
@@ -163,7 +168,9 @@ export function UploadPage() {
       )
     ) : state.phase === "rejected" ? (
       <div className="hrb-upload-result hrb-upload-result--rejected">
-        <div className="hrb-upload-result__icon" aria-hidden="true">⛔</div>
+        <div className="hrb-upload-result__icon" aria-hidden="true">
+          <Icon name="ban" size={28} />
+        </div>
         <h2 className="hrb-upload-result__title hrb-upload-result__title--danger">
           アップロードを拒否しました
         </h2>
@@ -183,7 +190,8 @@ export function UploadPage() {
       <div className="hrb-upload-zone">
         <DropZone state={state} dispatch={dispatch} onFiles={(f) => void handleFiles(f)} resultContent={resultContent} />
         <p className="hrb-upload-note">
-          対応形式: HTML（単一ファイル, 最大 5MB）/ ZIP（index.html 必須, 最大 20MB）
+          <Icon name="shield-check" size={14} />
+          対応形式: HTML（単一ファイル, 最大 5MB）/ ZIP（index.html 必須, 最大 20MB）· すべてのファイルは公開前にセキュリティスキャンされます
         </p>
       </div>
 

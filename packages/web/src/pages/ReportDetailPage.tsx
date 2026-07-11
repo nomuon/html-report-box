@@ -7,6 +7,7 @@ import { Button } from "../components/Button.tsx";
 import { StatusChip } from "../components/Chip.tsx";
 import { useCopyUrl } from "../components/CopyUrlRow.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
+import { Icon } from "../components/Icon.tsx";
 import { Modal } from "../components/Modal.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { EditReportModal } from "../components/report-modals.tsx";
@@ -98,7 +99,7 @@ export function ReportDetailPage() {
   if (query.isError || !query.data) {
     return (
       <div className="hrb-page">
-        <EmptyState icon="🚫" title="このレポートは表示できません" />
+        <EmptyState icon={<Icon name="ban" size={30} />} title="このレポートは表示できません" />
       </div>
     );
   }
@@ -126,10 +127,12 @@ export function ReportDetailPage() {
             </Button>
           )}
           <Button variant="secondary" onClick={() => void copyUrl(shareUrl)}>
-            🔗 共有URLをコピー
+            <Icon name="link" size={16} />
+            共有URLをコピー
           </Button>
           <Button variant="ghost-danger" onClick={() => setFlagOpen(true)}>
-            ⚠ 通報
+            <Icon name="flag" size={16} />
+            通報
           </Button>
         </div>
       </div>
@@ -144,7 +147,7 @@ export function ReportDetailPage() {
         />
       ) : (
         <EmptyState
-          icon="🕒"
+          icon={<Icon name="clock" size={30} />}
           title="このレポートはまだ公開されていません"
           detail={
             report.status === "pending_review"

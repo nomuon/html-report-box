@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { Icon } from "./Icon.tsx";
+import type { IconName } from "./Icon.tsx";
 
 export type ToastKind = "success" | "danger" | "info";
 
@@ -23,7 +25,11 @@ export function useToast(): ToastContextValue {
 
 const AUTO_DISMISS_MS = 5000;
 const MAX_TOASTS = 3;
-const ICONS: Record<ToastKind, string> = { success: "✓", danger: "✕", info: "ℹ" };
+const ICONS: Record<ToastKind, IconName> = {
+  success: "check-circle",
+  danger: "x-circle",
+  info: "info",
+};
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -74,11 +80,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             }}
           >
             <span className="hrb-toast__icon" aria-hidden="true">
-              {ICONS[t.kind]}
+              <Icon name={ICONS[t.kind]} size={18} />
             </span>
             <span className="hrb-toast__message">{t.message}</span>
             <button type="button" className="hrb-toast__close" aria-label="閉じる" onClick={() => dismiss(t.id)}>
-              ✕
+              <Icon name="x" size={14} />
             </button>
           </div>
         ))}

@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Button } from "./Button.tsx";
+import { Icon } from "./Icon.tsx";
 import { ProgressBar } from "./ProgressBar.tsx";
 import { formatBytes } from "../lib/format.ts";
 import type { DropzoneEvent, DropzoneState } from "../state/dropzone.ts";
@@ -106,7 +107,9 @@ export function DropZone({ state, dispatch, onFiles, onCancelUpload, resultConte
 
       {state.phase === "idle" && (
         <div className="hrb-dropzone__inner">
-          <div className="hrb-dropzone__icon" aria-hidden="true">📤</div>
+          <div className="hrb-dropzone__icon" aria-hidden="true">
+            <Icon name="upload-cloud" size={28} />
+          </div>
           <p className="hrb-dropzone__lead">ここに HTML / ZIP ファイルをドラッグ＆ドロップ</p>
           <p className="hrb-dropzone__or">または</p>
           <Button variant="secondary" size="lg" onClick={openPicker}>
@@ -117,14 +120,18 @@ export function DropZone({ state, dispatch, onFiles, onCancelUpload, resultConte
 
       {state.phase === "dragover" && (
         <div className="hrb-dropzone__inner">
-          <div className="hrb-dropzone__icon" aria-hidden="true">📥</div>
+          <div className="hrb-dropzone__icon" aria-hidden="true">
+            <Icon name="file-drop" size={28} />
+          </div>
           <p className="hrb-dropzone__lead">ドロップしてアップロード</p>
         </div>
       )}
 
       {state.phase === "selected" && (
         <div className="hrb-dropzone__inner">
-          <div className="hrb-dropzone__icon" aria-hidden="true">📄</div>
+          <div className="hrb-dropzone__icon" aria-hidden="true">
+            <Icon name="file" size={28} />
+          </div>
           <p className="hrb-dropzone__lead">{state.file.name}</p>
           <p className="hrb-dropzone__note">
             {formatBytes(state.file.size)} · {state.file.kind === "html" ? "HTML" : "ZIP"}
@@ -150,7 +157,9 @@ export function DropZone({ state, dispatch, onFiles, onCancelUpload, resultConte
 
       {state.phase === "scanning" && (
         <div className="hrb-dropzone__inner hrb-dropzone__inner--wide">
-          <div className="hrb-dropzone__icon" aria-hidden="true">🛡</div>
+          <div className="hrb-dropzone__icon hrb-dropzone__icon--accent" aria-hidden="true">
+            <Icon name="shield-check" size={28} />
+          </div>
           <p className="hrb-dropzone__lead hrb-dropzone__lead--muted">セキュリティスキャン中…</p>
           <ProgressBar />
           {scanSlow && (

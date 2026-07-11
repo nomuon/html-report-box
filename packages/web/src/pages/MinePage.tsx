@@ -7,6 +7,7 @@ import { useApp, useSession } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
 import { StatusChip } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
+import { Icon } from "../components/Icon.tsx";
 import {
   DeleteReportModal,
   EditReportModal,
@@ -37,7 +38,7 @@ export function MinePage() {
   if (!session) {
     return (
       <div className="hrb-page">
-        <EmptyState icon="🔒" title="ログインが必要です" />
+        <EmptyState icon={<Icon name="lock" size={30} />} title="ログインが必要です" />
       </div>
     );
   }
@@ -54,7 +55,7 @@ export function MinePage() {
 
       {!query.isLoading && reports.length === 0 && (
         <EmptyState
-          icon="📄"
+          icon={<Icon name="file" size={30} />}
           title="あなたのレポートはまだありません"
           action={<Button onClick={() => navigate("/upload")}>アップロードする</Button>}
         />
@@ -88,7 +89,7 @@ export function MinePage() {
                           data-tip="管理者の承認待ちです。承認されると公開されます"
                           tabIndex={0}
                         >
-                          ℹ️
+                          <Icon name="info" size={15} />
                         </span>
                       )}
                       {r.status === "rejected" && r.findings.length > 0 && (
@@ -97,7 +98,7 @@ export function MinePage() {
                           data-tip={r.findings.map((f) => f.message).join(" / ")}
                           tabIndex={0}
                         >
-                          ℹ️
+                          <Icon name="info" size={15} />
                         </span>
                       )}
                     </span>
@@ -112,7 +113,7 @@ export function MinePage() {
                         aria-label="メタ編集"
                         onClick={() => setModal({ type: "edit", report: r })}
                       >
-                        ✏️
+                        <Icon name="pencil" size={16} />
                       </button>
                       <button
                         type="button"
@@ -121,7 +122,7 @@ export function MinePage() {
                         aria-label="上書きアップロード"
                         onClick={() => setModal({ type: "overwrite", report: r })}
                       >
-                        ⬆️
+                        <Icon name="refresh" size={16} />
                       </button>
                       <button
                         type="button"
@@ -130,7 +131,7 @@ export function MinePage() {
                         aria-label="削除"
                         onClick={() => setModal({ type: "delete", report: r })}
                       >
-                        🗑
+                        <Icon name="trash" size={16} />
                       </button>
                     </div>
                   </td>

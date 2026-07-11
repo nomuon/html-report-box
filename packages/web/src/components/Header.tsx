@@ -5,6 +5,7 @@ import { DevAuthProvider } from "../lib/auth.ts";
 import { applyTheme, getEffectiveTheme, nextTheme } from "../lib/theme.ts";
 import type { Theme } from "../lib/theme.ts";
 import { Button } from "./Button.tsx";
+import { BrandMark, Icon } from "./Icon.tsx";
 import { Modal } from "./Modal.tsx";
 import { SearchInput } from "./SearchInput.tsx";
 
@@ -73,7 +74,8 @@ export function Header() {
     <header className="hrb-header">
       <div className="hrb-header__inner">
         <Link to="/" className="hrb-header__logo">
-          <span aria-hidden="true">📦</span> HTML Report Box
+          <BrandMark size={28} />
+          HTML Report Box
         </Link>
 
         <div className="hrb-header__search">
@@ -90,7 +92,8 @@ export function Header() {
               else setLoginOpen(true);
             }}
           >
-            + アップロード
+            <Icon name="upload" size={16} />
+            アップロード
           </Button>
 
           <button
@@ -99,7 +102,7 @@ export function Header() {
             aria-label="テーマ切り替え"
             onClick={toggleTheme}
           >
-            {theme === "light" ? "🌙" : "☀️"}
+            <Icon name={theme === "light" ? "moon" : "sun"} size={18} />
           </button>
 
           {session ? (
@@ -115,6 +118,9 @@ export function Header() {
                   {session.name.slice(0, 1).toUpperCase()}
                 </span>
                 <span className="hrb-usermenu__name">{session.name}</span>
+                <span className="hrb-usermenu__caret" aria-hidden="true">
+                  <Icon name="chevron-down" size={14} />
+                </span>
               </button>
               {menuOpen && (
                 <div className="hrb-usermenu__dropdown" role="menu">

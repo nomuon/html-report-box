@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
+import { Icon } from "./Icon.tsx";
 
 export interface ModalProps {
   open: boolean;
@@ -39,8 +40,8 @@ export function Modal({ open, title, onClose, children, footer, closeOnOverlay =
       <div className="hrb-modal" role="dialog" aria-modal="true" aria-label={title} ref={bodyRef}>
         <div className="hrb-modal__header">
           <h2 className="hrb-modal__title">{title}</h2>
-          <button type="button" className="hrb-btn hrb-btn--ghost hrb-modal__close" aria-label="閉じる" onClick={onClose}>
-            ✕
+          <button type="button" className="hrb-icon-btn hrb-modal__close" aria-label="閉じる" onClick={onClose}>
+            <Icon name="x" size={18} />
           </button>
         </div>
         <div className="hrb-modal__body">{children}</div>

@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Button } from "./Button.tsx";
+import { Icon } from "./Icon.tsx";
 import { useToast } from "./Toast.tsx";
 
 /** 共有 URL 行: readonly input + コピー ボタン（§4.3）. */
@@ -24,7 +25,13 @@ export function CopyUrlRow({ url }: { url: string }) {
     <div className="hrb-copy-row">
       <input ref={inputRef} className="hrb-copy-row__input" readOnly value={url} aria-label="共有 URL" />
       <Button variant="secondary" onClick={copy} className={copied ? "hrb-copy-row__done" : ""}>
-        {copied ? "✓ コピーしました" : "コピー"}
+        {copied ? (
+          <>
+            <Icon name="check" size={16} /> コピーしました
+          </>
+        ) : (
+          "コピー"
+        )}
       </Button>
     </div>
   );
