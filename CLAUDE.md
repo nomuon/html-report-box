@@ -64,3 +64,7 @@ Bun workspaces モノレポ。依存方向: `web→shared` / `api→core→share
 - サーバーは `Bun.serve()`（express 不使用）、フロントは HTML imports（Vite 不使用）。ただし上記「ランタイム互換の境界」に注意 — Lambda 搭載コードでは Bun API 禁止
 - テストは `bun:test`（`import { test, expect } from "bun:test"`）
 - Bun API の詳細は `node_modules/bun-types/docs/**.mdx`
+
+## ツール使用方針
+
+コードの検索・編集には、組み込みツールよりもSerenaのセマンティックツールを優先して使用してください。
