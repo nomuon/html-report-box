@@ -8,6 +8,7 @@ const CONTENT_ORIGIN = "https://content.example.com";
 function makeHandlers(overrides: Partial<RouteHandlerOptions> = {}) {
   const objects = new Map<string, Uint8Array>();
   const staged = new Map<string, Uint8Array>();
+  const issued = new Set(["staging/x", "staging/big"]);
   const handlers = createRouteHandlers({
     app: { fetch: async () => Response.json({ ok: true }) },
     mcp: { fetch: async () => Response.json({ jsonrpc: "2.0" }) },
@@ -15,11 +16,12 @@ function makeHandlers(overrides: Partial<RouteHandlerOptions> = {}) {
       putStagingObject: async (key, data) => void staged.set(key, data),
       getContentObject: async (key) => objects.get(key) ?? null,
     },
+    isIssuedStagingKey: async (key) => issued.has(key),
     contentBaseUrl: CONTENT_ORIGIN,
     corsEnabled: false,
     ...overrides,
   });
-  return { handlers, objects, staged };
+  return { handlers, objects, staged, issued };
 }
 
 describe("handleContent", () => {
@@ -74,6 +76,16 @@ describe("handleLocalUpload", () => {
     );
     expect(res.status).toBe(204);
     expect(staged.has("staging/x")).toBe(true);
+  });
+
+  test("未発行（or 消費済み）キーは 403 で拒否し staging に書き込まない", async () => {
+    const { handlers, staged } = makeHandlers();
+    const res = await handlers.handleLocalUpload(
+      uploadRequest({ key: "staging/not-issued", file: new Blob(["x"]) }),
+    );
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("forbidden");
+    expect(staged.size).toBe(0);
   });
 
   test("key 欠落は 400、サイズ超過は 413", async () => {

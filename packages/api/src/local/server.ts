@@ -57,6 +57,13 @@ const handlers = createRouteHandlers({
   app,
   mcp: mcpRoot,
   storage: ctx.storage,
+  // 発行時に setPendingUpload で保存されたキー（staging/<reportId>/<rand>）と
+  // 一致する場合のみ /local-upload を受理する（presigned POST の署名検証相当）。
+  isIssuedStagingKey: async (key) => {
+    const reportId = key.match(/^staging\/([^/]+)\//)?.[1];
+    if (!reportId) return false;
+    return (await ctx.repo.getPendingUpload(reportId)) === key;
+  },
   contentBaseUrl: config.contentOrigin,
   corsEnabled: config.corsEnabled,
 });

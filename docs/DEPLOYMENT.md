@@ -40,7 +40,9 @@ Bun は `.env` を自動ロードする（dotenv 不要）。
 - **app リスナー**（`PORT`）: SPA / `/api/*` / `/mcp` / `/local-upload`。`/r/*` はルート自体が存在しない（リバースプロキシを誤設定しても app オリジンからアップロード HTML は配信されない = fail-secure）
 - **content リスナー**（`HRB_CONTENT_PORT`）: `/r/*` のみ。CloudFront の content ディストリビューションと同一の CSP / セキュリティヘッダを付与
 
-セッショントークンは localStorage（オリジン単位で隔離）なので、**app と content を別ホスト名にすること**が防御の核。同一ホストは server-config が起動を拒否する。
+セッショントークンは localStorage（オリジン単位で隔離）なので、**app と content を別ホスト名にすること**が防御の核。同一ホスト名（ポート違い含む）は server-config が起動を拒否する。
+
+`/local-upload` は S3 presigned POST の署名検証に相当するチェックを行い、`POST /api/reports`（要認証・日次クォータ内）で発行された未消費の staging キーと一致するアップロードのみ受理する（無認証の任意書き込みによるディスク枯渇 DoS を防ぐ）。
 
 ### 手順
 
@@ -113,7 +115,7 @@ Bun は `.env` を自動ロードする（dotenv 不要）。
 Workers + D1 + R2 のアダプタ一式は未実装。ただし将来足すための下地は整備済み:
 
 - scanner の zip 展開は fflate（pure JS）で Workers 互換
-- `PresignedUpload` 契約は `method: "post" | "put"` を持ち、R2 の presigned PUT を表現できる
+- `PresignedUpload` 契約は `method: "post" | "put"` を持ち、R2 の presigned PUT を表現できる（現状 put を発行するアダプタは存在せず、web/smoke の put 分岐はユニットテストのみで E2E 未検証の将来配線）
 - `packages/core/src/conformance/` の契約テストが第 3 アダプタの受け入れ基準になる
 
 追加する場合は `core/src/cloudflare/`（D1 Repository / R2 ObjectStorage / purge CdnInvalidator）+ Workers エントリポイント + `infra-cloudflare`（wrangler）を実装し、契約テストを通すこと。オリジン分離（app と content を別ドメイン）は Cloudflare でも必須。

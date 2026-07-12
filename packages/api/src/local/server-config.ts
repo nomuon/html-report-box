@@ -140,7 +140,9 @@ export function resolveServerConfig(env: Record<string, string | undefined>): Se
 
   const appOrigin = parseHttpsOrigin(env.HRB_APP_ORIGIN, "HRB_APP_ORIGIN", errors);
   const contentOrigin = parseHttpsOrigin(env.HRB_CONTENT_ORIGIN, "HRB_CONTENT_ORIGIN", errors);
-  if (appOrigin && contentOrigin && appOrigin.host === contentOrigin.host) {
+  // hostname（ポート除外）で比較する。ポート違いは別オリジンではあるが、
+  // 将来 cookie を導入した場合 cookie はポート非依存のため防御が破れる。
+  if (appOrigin && contentOrigin && appOrigin.hostname === contentOrigin.hostname) {
     errors.push(
       "HRB_CONTENT_ORIGIN は HRB_APP_ORIGIN と別のホスト名にしてください" +
         "（同一オリジン配信はアップロード HTML からのセッショントークン窃取を許します）",

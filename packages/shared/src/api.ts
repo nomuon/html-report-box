@@ -82,7 +82,6 @@ export const PresignedUploadSchema = z.object({
   maxSizeBytes: z.number().int().positive(),
 });
 export type PresignedUpload = z.infer<typeof PresignedUploadSchema>;
-export type PresignedUploadInput = z.input<typeof PresignedUploadSchema>;
 
 // =====================
 // GET /config (public)

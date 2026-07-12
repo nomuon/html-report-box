@@ -116,6 +116,12 @@ describe("resolveServerConfig: vps", () => {
     ).toThrow(/別のホスト名/);
   });
 
+  test("同一ホスト名でポートだけ違うオリジンも拒否（hostname 比較）", () => {
+    expect(() =>
+      resolveServerConfig({ ...VPS_ENV, HRB_CONTENT_ORIGIN: `${VPS_ENV.HRB_APP_ORIGIN}:8443` }),
+    ).toThrow(/別のホスト名/);
+  });
+
   test("PORT と HRB_CONTENT_PORT の重複は拒否", () => {
     expect(() =>
       resolveServerConfig({ ...VPS_ENV, PORT: "3000", HRB_CONTENT_PORT: "3000" }),

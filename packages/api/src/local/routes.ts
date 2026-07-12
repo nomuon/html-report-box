@@ -23,6 +23,11 @@ export interface RouteHandlerOptions {
     putStagingObject(key: string, data: Uint8Array): Promise<void>;
     getContentObject(key: string): Promise<Uint8Array | null>;
   };
+  /**
+   * 発行済み（pending）の staging キーか検証する。S3 presigned POST の
+   * 署名+有効期限チェックに相当し、無認証の任意 staging 書き込みを防ぐ。
+   */
+  isIssuedStagingKey(key: string): Promise<boolean>;
   /** /r/<id> → /r/<id>/ リダイレクトに使うコンテンツ側オリジン。 */
   contentBaseUrl: string;
   /** 別ポートの web dev サーバー向け CORS（dev のみ true）。 */
@@ -61,7 +66,7 @@ function withHeaders(res: Response, extra: Record<string, string>): Response {
 }
 
 export function createRouteHandlers(opts: RouteHandlerOptions): RouteHandlers {
-  const { app, mcp, storage, contentBaseUrl, corsEnabled } = opts;
+  const { app, mcp, storage, isIssuedStagingKey, contentBaseUrl, corsEnabled } = opts;
 
   async function handleApi(req: Request): Promise<Response> {
     if (!corsEnabled) return app.fetch(req);
@@ -79,8 +84,8 @@ export function createRouteHandlers(opts: RouteHandlerOptions): RouteHandlers {
 
   // ---- /local-upload: S3 presigned POST のローカル代替 ----
 
-  function uploadError(status: number, message: string): Response {
-    const res = Response.json({ error: { code: "bad_request", message } }, { status });
+  function uploadError(status: number, message: string, code = "bad_request"): Response {
+    const res = Response.json({ error: { code, message } }, { status });
     return corsEnabled ? withHeaders(res, CORS_HEADERS) : res;
   }
 
@@ -101,6 +106,11 @@ export function createRouteHandlers(opts: RouteHandlerOptions): RouteHandlers {
     }
     if (file.size > MAX_ZIP_SIZE_BYTES) {
       return uploadError(413, `file exceeds ${MAX_ZIP_SIZE_BYTES} bytes`);
+    }
+    // S3 presigned POST の署名検証に相当: POST /api/reports（要認証・日次
+    // クォータ内）で発行され、まだ complete されていないキーのみ受理する。
+    if (!(await isIssuedStagingKey(key))) {
+      return uploadError(403, "unknown or already consumed staging key", "forbidden");
     }
     try {
       await storage.putStagingObject(key, new Uint8Array(await file.arrayBuffer()));
