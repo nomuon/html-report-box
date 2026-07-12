@@ -21,6 +21,27 @@ type View =
   | { type: "preview"; entry: ReportVersion }
   | { type: "confirm"; entry: ReportVersion };
 
+/** 一覧中の最新 = 現在の版のバージョン番号（API の並び順に依存しない）。 */
+export function currentVersionOf(versions: readonly ReportVersion[]): number | undefined {
+  return versions.length > 0 ? Math.max(...versions.map((v) => v.version)) : undefined;
+}
+
+/** ロールバック確認ビューの本文（テストのため分離）。 */
+export function RollbackConfirmBody({ version }: { version: number }) {
+  return (
+    <>
+      <p>
+        現在の内容の上に v{version} の内容を新しい版として復元します。
+        セキュリティスキャンが再実行されます
+      </p>
+      <p>
+        復元する版が現在の基準で拒否（block）判定になった場合、レポート全体が「拒否」状態になり、
+        閲覧できなくなります
+      </p>
+    </>
+  );
+}
+
 export function VersionHistoryModal({
   report,
   open,
@@ -42,9 +63,9 @@ export function VersionHistoryModal({
     enabled: open,
     retry: false,
   });
-  // API は新しい順で返す。先頭が現在の版（戻す対象にならない）。
   const list = versions.data?.versions ?? [];
-  const currentVersion = list[0]?.version;
+  // 最新の版が現在の版（戻す対象にならない）
+  const currentVersion = currentVersionOf(list);
 
   const source = useQuery({
     queryKey: ["report-version-source", report.id, view.type === "preview" ? view.entry.version : 0],
@@ -225,12 +246,7 @@ export function VersionHistoryModal({
         </>
       )}
 
-      {view.type === "confirm" && (
-        <p>
-          現在の内容の上に v{view.entry.version} の内容を新しい版として復元します。
-          セキュリティスキャンが再実行されます
-        </p>
-      )}
+      {view.type === "confirm" && <RollbackConfirmBody version={view.entry.version} />}
     </Modal>
   );
 }
