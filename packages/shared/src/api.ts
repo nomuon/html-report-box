@@ -156,7 +156,15 @@ export type GetConfigResponse = z.infer<typeof GetConfigResponseSchema>;
 // =====================
 // GET /reports (public list, published only)
 // =====================
-export const ListReportsQuerySchema = PaginationQuerySchema;
+/** updatedAt sort order for list endpoints (default: desc = newest first). */
+export const LIST_ORDERS = ["desc", "asc"] as const;
+export const ListOrderSchema = z.enum(LIST_ORDERS);
+export type ListOrder = z.infer<typeof ListOrderSchema>;
+
+export const ListReportsQuerySchema = PaginationQuerySchema.extend({
+  order: ListOrderSchema.optional(),
+  kind: ReportKindSchema.optional(),
+});
 export type ListReportsQuery = z.infer<typeof ListReportsQuerySchema>;
 
 export const ListReportsResponseSchema = z.object({
@@ -172,6 +180,8 @@ export const SEARCH_QUERY_MAX = 200;
 export const SearchQuerySchema = z.object({
   q: z.string().trim().min(1).max(SEARCH_QUERY_MAX),
   limit: z.coerce.number().int().min(1).max(50).optional(),
+  /** Opaque continuation cursor (SearchResponse.nextCursor of the previous page). */
+  cursor: z.string().min(1).optional(),
 });
 export type SearchQuery = z.infer<typeof SearchQuerySchema>;
 
@@ -186,6 +196,8 @@ export type SearchResult = z.infer<typeof SearchResultSchema>;
 
 export const SearchResponseSchema = z.object({
   results: z.array(SearchResultSchema),
+  /** Present when more ranked results remain beyond this page. */
+  nextCursor: z.string().optional(),
 });
 export type SearchResponse = z.infer<typeof SearchResponseSchema>;
 

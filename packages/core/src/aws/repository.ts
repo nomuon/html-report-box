@@ -26,7 +26,7 @@ import {
 import { DAILY_UPLOAD_LIMIT } from "@hrb/shared";
 import type { ReportMeta, ReportStatus } from "@hrb/shared";
 import { DomainError } from "../errors.ts";
-import type { Page, PageOptions, ReportFlag, ReportRepository } from "../ports.ts";
+import type { Page, PageOptions, PublishedListOptions, ReportFlag, ReportRepository } from "../ports.ts";
 import { decodeKeyCursor, encodeKeyCursor } from "./cursor.ts";
 import { batchWriteAll, chunk, isConditionalCheckFailed } from "./dynamo-util.ts";
 import type { WriteRequest } from "./dynamo-util.ts";
@@ -221,14 +221,26 @@ export class DynamoReportRepository implements ReportRepository {
 
   // ---- Lists ----
 
-  async listPublished(opts?: PageOptions): Promise<Page<ReportMeta>> {
+  /**
+   * GSI1 is keyed on updatedAt, so `order` maps directly to ScanIndexForward.
+   * `kind` is not part of any index key — it is applied as a FilterExpression,
+   * and DynamoDB evaluates Limit BEFORE the filter, so a filtered page may
+   * come back short (even empty) while nextCursor still advances. Callers
+   * simply keep paging; the filter itself is exact.
+   */
+  async listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>> {
     const res = await this.client.send(
       new QueryCommand({
         TableName: this.tableName,
         IndexName: GSI1_NAME,
         KeyConditionExpression: "gsi1pk = :pub",
-        ExpressionAttributeValues: { ":pub": GSI1_PUBLISHED_PK },
-        ScanIndexForward: false, // updatedAt descending
+        ...(opts?.kind ? { FilterExpression: "#kind = :kind" } : {}),
+        ...(opts?.kind ? { ExpressionAttributeNames: { "#kind": "kind" } } : {}),
+        ExpressionAttributeValues: {
+          ":pub": GSI1_PUBLISHED_PK,
+          ...(opts?.kind ? { ":kind": opts.kind } : {}),
+        },
+        ScanIndexForward: opts?.order === "asc", // updatedAt descending by default
         Limit: opts?.limit ?? DEFAULT_PAGE_LIMIT,
         ...(opts?.cursor ? { ExclusiveStartKey: decodeKeyCursor(opts.cursor) } : {}),
       }),

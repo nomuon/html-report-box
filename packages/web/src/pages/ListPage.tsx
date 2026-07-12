@@ -1,8 +1,8 @@
 /** 画面①: 一覧 (`/`) / 検索結果 (`/search?q=`) */
 import { useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import type { PublicReport } from "@hrb/shared";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import type { ListOrder, PublicReport, ReportKind } from "@hrb/shared";
 import { useApp } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
 import { KindChip, StatusChip } from "../components/Chip.tsx";
@@ -98,6 +98,36 @@ function ReportCards({ reports, query }: { reports: PublicReport[]; query?: stri
   );
 }
 
+/** 種類フィルタチップ（すべて / HTML / ZIP） */
+function KindFilter({
+  kind,
+  onChange,
+}: {
+  kind: ReportKind | undefined;
+  onChange: (k: ReportKind | undefined) => void;
+}) {
+  const options: Array<{ value: ReportKind | undefined; label: string }> = [
+    { value: undefined, label: "すべて" },
+    { value: "html", label: "HTML" },
+    { value: "zip", label: "ZIP" },
+  ];
+  return (
+    <div className="hrb-filter-chips" role="group" aria-label="種類フィルタ">
+      {options.map((o) => (
+        <button
+          key={o.label}
+          type="button"
+          className={`hrb-filter-chip ${kind === o.value ? "hrb-filter-chip--active" : ""}`}
+          aria-pressed={kind === o.value}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ViewToggle({ view, onChange }: { view: ViewMode; onChange: (v: ViewMode) => void }) {
   return (
     <div className="hrb-view-toggle" role="group" aria-label="表示切替">
@@ -125,23 +155,48 @@ export function ListPage() {
   const { api } = useApp();
   const location = useLocation();
   const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const [view, setView] = useState<ViewMode>(getStoredView);
 
   const isSearch = location.pathname === "/search";
   const q = isSearch ? (params.get("q") ?? "").trim() : "";
 
+  // ソート・種類フィルタは URL クエリ（?order=&kind=）と同期する
+  // （リロード・URL 共有で状態が維持される）。デフォルト値はクエリから省く。
+  const order: ListOrder = params.get("order") === "asc" ? "asc" : "desc";
+  const kindParam = params.get("kind");
+  const kind: ReportKind | undefined =
+    kindParam === "html" || kindParam === "zip" ? kindParam : undefined;
+
+  const updateListParams = (next: { order?: ListOrder; kind?: ReportKind | undefined }) => {
+    const p = new URLSearchParams(params);
+    const nextOrder = "order" in next ? next.order : order;
+    const nextKind = "kind" in next ? next.kind : kind;
+    if (nextOrder === "asc") p.set("order", "asc");
+    else p.delete("order");
+    if (nextKind !== undefined) p.set("kind", nextKind);
+    else p.delete("kind");
+    setParams(p, { replace: true });
+  };
+
   const listQuery = useInfiniteQuery({
-    queryKey: ["reports"],
-    queryFn: ({ pageParam }) => api.listReports({ cursor: pageParam }),
+    queryKey: ["reports", order, kind ?? "all"],
+    queryFn: ({ pageParam }) =>
+      api.listReports({
+        cursor: pageParam,
+        ...(order === "asc" ? { order } : {}),
+        ...(kind !== undefined ? { kind } : {}),
+      }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor,
     enabled: !isSearch,
   });
 
-  const searchQuery = useQuery({
+  const searchQuery = useInfiniteQuery({
     queryKey: ["search", q],
-    queryFn: () => api.search(q),
+    queryFn: ({ pageParam }) => api.search(q, { cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
     enabled: isSearch && q.length > 0,
   });
 
@@ -155,10 +210,11 @@ export function ListPage() {
   };
 
   const reports: PublicReport[] = isSearch
-    ? (searchQuery.data?.results.map((r) => r.report) ?? [])
+    ? (searchQuery.data?.pages.flatMap((p) => p.results.map((r) => r.report)) ?? [])
     : (listQuery.data?.pages.flatMap((p) => p.reports) ?? []);
 
   const loading = isSearch ? searchQuery.isLoading : listQuery.isLoading;
+  const pager = isSearch ? searchQuery : listQuery;
 
   return (
     <div className="hrb-page">
@@ -177,6 +233,21 @@ export function ListPage() {
         <ViewToggle view={view} onChange={changeView} />
       </div>
 
+      {!isSearch && (
+        <div className="hrb-list-controls">
+          <KindFilter kind={kind} onChange={(k) => updateListParams({ kind: k })} />
+          <select
+            className="hrb-select"
+            aria-label="並び順"
+            value={order}
+            onChange={(e) => updateListParams({ order: e.target.value === "asc" ? "asc" : "desc" })}
+          >
+            <option value="desc">新しい順</option>
+            <option value="asc">古い順</option>
+          </select>
+        </div>
+      )}
+
       {loading && <p className="hrb-loading">読み込み中…</p>}
 
       {!loading && reports.length === 0 && (
@@ -184,6 +255,11 @@ export function ListPage() {
           <EmptyState
             icon={<Icon name="search" size={30} />}
             title={`「${q}」に一致するレポートは見つかりませんでした`}
+          />
+        ) : kind !== undefined ? (
+          <EmptyState
+            icon={<Icon name="inbox" size={30} />}
+            title="条件に一致するレポートがありません"
           />
         ) : (
           <EmptyState
@@ -201,12 +277,12 @@ export function ListPage() {
           <ReportCards reports={reports} query={isSearch ? q : undefined} />
         ))}
 
-      {!isSearch && listQuery.hasNextPage && (
+      {pager.hasNextPage && (
         <div className="hrb-load-more">
           <Button
             variant="secondary"
-            loading={listQuery.isFetchingNextPage}
-            onClick={() => void listQuery.fetchNextPage()}
+            loading={pager.isFetchingNextPage}
+            onClick={() => void pager.fetchNextPage()}
           >
             さらに読み込む
           </Button>

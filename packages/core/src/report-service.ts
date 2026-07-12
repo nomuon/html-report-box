@@ -37,6 +37,7 @@ import type {
   ObjectStorage,
   Page,
   PageOptions,
+  PublishedListOptions,
   ReportFlag,
   ReportRepository,
   SearchIndex,
@@ -111,7 +112,7 @@ export class ReportService {
     return `${this.contentBaseUrl}/r/${id}/`;
   }
 
-  async listPublished(opts?: PageOptions): Promise<Page<ReportMeta>> {
+  async listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>> {
     return this.repo.listPublished(opts);
   }
 
@@ -134,11 +135,24 @@ export class ReportService {
     return { report: meta, isOwner };
   }
 
-  async search(query: string, limit = 20): Promise<SearchResult[]> {
+  /**
+   * Ranked full-text search over published reports. The full ranking is
+   * recomputed per call and paginated with an offset cursor (same style as
+   * adminListFlagged; the recompute cost is acceptable at local scale).
+   */
+  async search(
+    query: string,
+    opts?: { limit?: number; cursor?: string },
+  ): Promise<{ results: SearchResult[]; nextCursor?: string }> {
+    const limit = opts?.limit ?? 20;
+    const offset = opts?.cursor ? Number.parseInt(opts.cursor, 10) : 0;
+    if (Number.isNaN(offset) || offset < 0) {
+      throw new DomainError("bad_request", "invalid cursor");
+    }
     const tokens = tokenizeQuery(query);
-    if (tokens.length === 0) return [];
+    if (tokens.length === 0) return { results: [] };
     const hits = await this.searchIndex.query(tokens);
-    if (hits.length === 0) return [];
+    if (hits.length === 0) return { results: [] };
     const metas = await this.repo.getMany(hits.map((h) => h.reportId));
     const results: Array<SearchResult & { updatedAt: string }> = [];
     for (const hit of hits) {
@@ -156,7 +170,13 @@ export class ReportService {
       if (a.score !== b.score) return b.score - a.score;
       return b.updatedAt.localeCompare(a.updatedAt);
     });
-    return results.slice(0, limit).map(({ updatedAt: _u, ...rest }) => rest);
+    const page = results
+      .slice(offset, offset + limit)
+      .map(({ updatedAt: _u, ...rest }) => rest);
+    const next = offset + limit;
+    return next < results.length
+      ? { results: page, nextCursor: String(next) }
+      : { results: page };
   }
 
   // =====================

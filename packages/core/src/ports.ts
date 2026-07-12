@@ -5,6 +5,7 @@
 import type {
   AdminUser,
   AuthConfig,
+  ListOrder,
   PresignedUpload,
   ReportFlag,
   ReportKind,
@@ -58,6 +59,14 @@ export interface Page<T> {
   nextCursor?: string;
 }
 
+/** Options for the public published list: sort order + kind filter. */
+export interface PublishedListOptions extends PageOptions {
+  /** updatedAt sort order (default "desc" = newest first). */
+  order?: ListOrder;
+  /** Restrict results to one report kind. */
+  kind?: ReportKind;
+}
+
 // ---- Repository ----
 
 export type { ReportFlag };
@@ -70,8 +79,8 @@ export interface ReportRepository {
   update(meta: ReportMeta): Promise<void>;
   /** Removes META, TOKENS, pending-upload pointer and flags for the id. */
   delete(id: string): Promise<void>;
-  /** status=published only, updatedAt descending. */
-  listPublished(opts?: PageOptions): Promise<Page<ReportMeta>>;
+  /** status=published only, updatedAt ordered (default descending), optional kind filter. */
+  listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>>;
   /** All statuses for one owner, updatedAt descending. */
   listByOwner(ownerSub: string, opts?: PageOptions): Promise<Page<ReportMeta>>;
   /** Admin: all reports, optional status filter, updatedAt descending. */

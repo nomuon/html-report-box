@@ -10,6 +10,7 @@ import {
   FlagReportRequestSchema,
   GetConfigResponseSchema,
   GetQuotaResponseSchema,
+  ListReportsQuerySchema,
   isAllowedCdnHost,
   isAllowedZipEntryExtension,
   makeError,
@@ -172,6 +173,23 @@ describe("API request schemas", () => {
     expect(parsed.limit).toBe(10);
     expect(SearchQuerySchema.safeParse({ q: "   " }).success).toBe(false);
     expect(SearchQuerySchema.safeParse({ q: "a", limit: "0" }).success).toBe(false);
+  });
+
+  test("SearchQuery accepts an optional continuation cursor", () => {
+    expect(SearchQuerySchema.parse({ q: "a", cursor: "20" }).cursor).toBe("20");
+    expect(SearchQuerySchema.parse({ q: "a" }).cursor).toBeUndefined();
+    expect(SearchQuerySchema.safeParse({ q: "a", cursor: "" }).success).toBe(false);
+  });
+
+  test("ListReportsQuery accepts order/kind and rejects unknown values", () => {
+    expect(ListReportsQuerySchema.parse({ order: "asc", kind: "zip", limit: "5" })).toEqual({
+      order: "asc",
+      kind: "zip",
+      limit: 5,
+    });
+    expect(ListReportsQuerySchema.parse({})).toEqual({});
+    expect(ListReportsQuerySchema.safeParse({ order: "up" }).success).toBe(false);
+    expect(ListReportsQuerySchema.safeParse({ kind: "tar" }).success).toBe(false);
   });
 
   test("CompleteReportRequest requires staging key", () => {

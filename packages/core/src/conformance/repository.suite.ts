@@ -130,6 +130,27 @@ export function runRepositoryConformance(name: string, factory: RepositoryFactor
       expect(all.every((m) => m.status === "published")).toBe(true);
     });
 
+    test("listPublished supports order=asc and a kind filter", async () => {
+      const repo = await factory();
+      await repo.create(makeMeta(rid("k1"), { status: "published", kind: "html", updatedAt: "2026-07-01T00:00:00.000Z" }));
+      await repo.create(makeMeta(rid("k2"), { status: "published", kind: "zip", updatedAt: "2026-07-02T00:00:00.000Z" }));
+      await repo.create(makeMeta(rid("k3"), { status: "published", kind: "html", updatedAt: "2026-07-03T00:00:00.000Z" }));
+
+      // order=asc は updatedAt 昇順（古い順）。
+      const asc = await drain((opts) => repo.listPublished({ ...opts, order: "asc" }), 2);
+      expect(asc.map((m) => m.id)).toEqual([rid("k1"), rid("k2"), rid("k3")]);
+
+      // kind フィルタは指定 kind のみ返す（ページをまたいでも正確）。
+      const zipOnly = await drain((opts) => repo.listPublished({ ...opts, kind: "zip" }), 2);
+      expect(zipOnly.map((m) => m.id)).toEqual([rid("k2")]);
+
+      const htmlAsc = await drain(
+        (opts) => repo.listPublished({ ...opts, kind: "html", order: "asc" }),
+        2,
+      );
+      expect(htmlAsc.map((m) => m.id)).toEqual([rid("k1"), rid("k3")]);
+    });
+
     test("listByOwner returns all statuses for one owner, newest first", async () => {
       const repo = await factory();
       await repo.create(makeMeta(rid("o1"), { ownerSub: "alice", status: "private", updatedAt: "2026-07-01T00:00:00.000Z" }));

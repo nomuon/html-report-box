@@ -48,10 +48,14 @@ describe("ApiClient", () => {
     const client = new ApiClient({ fetchFn });
     await client.search("日本語 query");
     expect(calls[0]?.url).toBe(`/api/search?${new URLSearchParams({ q: "日本語 query" })}`);
+    await client.search("q2", { limit: 5, cursor: "20" });
+    expect(calls[1]?.url).toBe("/api/search?q=q2&limit=5&cursor=20");
     await client.listReports({ limit: 10, cursor: "abc" });
-    expect(calls[1]?.url).toBe("/api/reports?limit=10&cursor=abc");
+    expect(calls[2]?.url).toBe("/api/reports?limit=10&cursor=abc");
+    await client.listReports({ order: "asc", kind: "zip", limit: 10 });
+    expect(calls[3]?.url).toBe("/api/reports?order=asc&kind=zip&limit=10");
     await client.listReports();
-    expect(calls[2]?.url).toBe("/api/reports");
+    expect(calls[4]?.url).toBe("/api/reports");
   });
 
   test("POST bodies are JSON with content-type", async () => {

@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLocalContext, DEV_USER_HEADER } from "@hrb/core/local";
-import type { ScanResult, SecurityScanner } from "@hrb/core";
+import type { ScanResult, SecurityScanner, ZipExtractor } from "@hrb/core";
 import { createApp, FLAG_RATE_LIMIT } from "./app.ts";
 import type { AppType } from "./app.ts";
 
@@ -26,7 +26,14 @@ class FakeScanner implements SecurityScanner {
   }
 }
 
-function makeEnv(opts: { dailyUploadLimit?: number } = {}) {
+/** どんなバイト列でも root index.html 1 枚として展開する（zip kind のテスト用）。 */
+const fakeZipExtractor: ZipExtractor = {
+  async extract(data) {
+    return [{ path: "index.html", data }];
+  },
+};
+
+function makeEnv(opts: { dailyUploadLimit?: number; now?: () => Date } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "hrb-api-test-"));
   tempDirs.push(dir);
   const scanner = new FakeScanner();
@@ -34,6 +41,8 @@ function makeEnv(opts: { dailyUploadLimit?: number } = {}) {
     dataDir: dir,
     contentBaseUrl: BASE,
     scanner,
+    zipExtractor: fakeZipExtractor,
+    ...(opts.now !== undefined ? { now: opts.now } : {}),
     ...(opts.dailyUploadLimit !== undefined ? { dailyUploadLimit: opts.dailyUploadLimit } : {}),
   });
   const app = createApp({
@@ -83,10 +92,11 @@ async function upload(
   user: string,
   title: string,
   html = `<html><head><title>${title}</title></head><body>report body for ${title}</body></html>`,
+  kind: "html" | "zip" = "html",
 ) {
   const created = await call(env.app, "POST", "/reports", {
     user,
-    body: { title, kind: "html" },
+    body: { title, kind },
   });
   expect(created.status).toBe(201);
   const id: string = created.json.report.id;
@@ -105,8 +115,9 @@ async function uploadPublished(
   user: string,
   title: string,
   html?: string,
+  kind?: "html" | "zip",
 ) {
-  const result = await upload(env, user, title, html);
+  const result = await upload(env, user, title, html, kind);
   const published = await call(env.app, "POST", `/reports/${result.id}/publish`, { user });
   expect(published.status).toBe(200);
   return { ...result, published };
@@ -187,6 +198,78 @@ test("GET /search requires q", async () => {
   const res = await call(env.app, "GET", "/search");
   expect(res.status).toBe(400);
   expect(res.json.error.code).toBe("validation_failed");
+});
+
+// =====================
+// GET /reports — order / kind
+// =====================
+
+test("GET /reports supports order=asc and a kind filter", async () => {
+  // updatedAt の同着で並びが揺れないよう、1秒ずつ進む固定クロックを使う
+  let tick = 0;
+  const env = makeEnv({ now: () => new Date(Date.UTC(2026, 6, 12, 0, 0, tick++)) });
+  const a = await uploadPublished(env, "alice", "oldest html");
+  const b = await uploadPublished(env, "alice", "middle zip", "<html>zip index</html>", "zip");
+  const c = await uploadPublished(env, "alice", "newest html");
+
+  // default: 新しい順（updatedAt desc）
+  const desc = await call(env.app, "GET", "/reports");
+  expect(desc.json.reports.map((r: any) => r.id)).toEqual([c.id, b.id, a.id]);
+
+  const asc = await call(env.app, "GET", "/reports?order=asc");
+  expect(asc.status).toBe(200);
+  expect(asc.json.reports.map((r: any) => r.id)).toEqual([a.id, b.id, c.id]);
+
+  const zipOnly = await call(env.app, "GET", "/reports?kind=zip");
+  expect(zipOnly.json.reports.map((r: any) => r.id)).toEqual([b.id]);
+
+  const htmlAsc = await call(env.app, "GET", "/reports?kind=html&order=asc");
+  expect(htmlAsc.json.reports.map((r: any) => r.id)).toEqual([a.id, c.id]);
+
+  // 契約スキーマ外の値は 400 validation_failed
+  const badOrder = await call(env.app, "GET", "/reports?order=up");
+  expect(badOrder.status).toBe(400);
+  expect(badOrder.json.error.code).toBe("validation_failed");
+  const badKind = await call(env.app, "GET", "/reports?kind=tar");
+  expect(badKind.status).toBe(400);
+  expect(badKind.json.error.code).toBe("validation_failed");
+});
+
+// =====================
+// GET /search — cursor pagination
+// =====================
+
+test("GET /search paginates with nextCursor", async () => {
+  let tick = 0;
+  const env = makeEnv({ now: () => new Date(Date.UTC(2026, 6, 12, 0, 0, tick++)) });
+  const ids: string[] = [];
+  for (const title of ["paging first", "paging second", "paging third"]) {
+    const { id } = await uploadPublished(env, "alice", title);
+    ids.push(id);
+  }
+
+  const first = await call(env.app, "GET", "/search?q=paging&limit=2");
+  expect(first.status).toBe(200);
+  expect(first.json.results).toHaveLength(2);
+  expect(first.json.nextCursor).toBeDefined();
+
+  const second = await call(
+    env.app,
+    "GET",
+    `/search?q=paging&limit=2&cursor=${first.json.nextCursor}`,
+  );
+  expect(second.status).toBe(200);
+  expect(second.json.results).toHaveLength(1);
+  expect(second.json.nextCursor).toBeUndefined();
+
+  // ページをまたいで重複せず全件をカバーする
+  const seen = [...first.json.results, ...second.json.results].map((r: any) => r.report.id);
+  expect(new Set(seen).size).toBe(3);
+  expect([...seen].sort()).toEqual([...ids].sort());
+
+  const bad = await call(env.app, "GET", "/search?q=paging&cursor=xyz");
+  expect(bad.status).toBe(400);
+  expect(bad.json.error.code).toBe("bad_request");
 });
 
 test("unknown route → 404 with error envelope", async () => {

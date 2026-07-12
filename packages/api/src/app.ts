@@ -209,7 +209,11 @@ export function createApp(ctx: AppContext): AppType {
 
   app.get("/reports", async (c) => {
     const query = parseWith(ListReportsQuerySchema, c.req.query(), "query");
-    const page = await ctx.service.listPublished(pageOptions(query));
+    const page = await ctx.service.listPublished({
+      ...pageOptions(query),
+      ...(query.order !== undefined ? { order: query.order } : {}),
+      ...(query.kind !== undefined ? { kind: query.kind } : {}),
+    });
     return c.json({
       reports: page.items.map(toPublicReport),
       ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}),
@@ -218,8 +222,14 @@ export function createApp(ctx: AppContext): AppType {
 
   app.get("/search", async (c) => {
     const query = parseWith(SearchQuerySchema, c.req.query(), "query");
-    const results = await ctx.service.search(query.q, query.limit ?? 20);
-    return c.json({ results });
+    const { results, nextCursor } = await ctx.service.search(query.q, {
+      limit: query.limit ?? 20,
+      ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
+    });
+    return c.json({
+      results,
+      ...(nextCursor !== undefined ? { nextCursor } : {}),
+    });
   });
 
   app.get("/reports/:id", async (c) => {

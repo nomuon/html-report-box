@@ -5,7 +5,7 @@
 import { join } from "node:path";
 import type { ReportMeta, ReportStatus } from "@hrb/shared";
 import { DomainError } from "../errors.ts";
-import type { Page, PageOptions, ReportFlag, ReportRepository } from "../ports.ts";
+import type { Page, PageOptions, PublishedListOptions, ReportFlag, ReportRepository } from "../ports.ts";
 import { JsonStore } from "./json-store.ts";
 
 interface ReportsDb {
@@ -100,11 +100,12 @@ export class LocalReportRepository implements ReportRepository {
     });
   }
 
-  async listPublished(opts?: PageOptions): Promise<Page<ReportMeta>> {
+  async listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>> {
     const all = Object.values(this.store.get().reports)
-      .filter((m) => m.status === "published")
+      .filter((m) => m.status === "published" && (opts?.kind === undefined || m.kind === opts.kind))
       .sort(byUpdatedAtDesc)
       .map((m) => structuredClone(m));
+    if (opts?.order === "asc") all.reverse();
     return paginate(all, opts);
   }
 

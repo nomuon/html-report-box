@@ -58,7 +58,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       },
     },
     async ({ query, limit }) => {
-      const results = await reportService.search(query, limit ?? DEFAULT_LIMIT);
+      const { results } = await reportService.search(query, { limit: limit ?? DEFAULT_LIMIT });
       return jsonResult({
         results: results.map((r) => ({
           id: r.report.id,

@@ -99,7 +99,7 @@ describe("report lifecycle", () => {
     expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).not.toBeNull();
     expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
     await expectDomainError(ctx.service.get(report.id), "not_found");
-    expect(await ctx.service.search("移転計画")).toHaveLength(0);
+    expect((await ctx.service.search("移転計画")).results).toHaveLength(0);
 
     // owner & admin can still read the meta and the source
     expect((await ctx.service.get(report.id, alice)).report.status).toBe("private");
@@ -117,7 +117,7 @@ describe("report lifecycle", () => {
     const extracted = await ctx.storage.getContentObject(`reports/${report.id}/.extracted.txt`);
     expect(dec.decode(extracted!)).toContain("品川");
 
-    const hits = await ctx.service.search("移転計画");
+    const { results: hits } = await ctx.service.search("移転計画");
     expect(hits.length).toBe(1);
     expect(hits[0]!.report.id).toBe(report.id);
     expect("ownerSub" in hits[0]!.report).toBe(false);
@@ -135,7 +135,7 @@ describe("report lifecycle", () => {
     expect(back.status).toBe("private");
     // hidden from public list/search/content, but source retained
     await expectDomainError(ctx.service.get(report.id), "not_found");
-    expect(await ctx.service.search("四半期")).toHaveLength(0);
+    expect((await ctx.service.search("四半期")).results).toHaveLength(0);
     expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
     expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).not.toBeNull();
     // owner still sees it
@@ -145,7 +145,7 @@ describe("report lifecycle", () => {
     // republish from the retained source
     const again = await ctx.service.publish(alice, report.id);
     expect(again.report.status).toBe("published");
-    expect(await ctx.service.search("四半期")).toHaveLength(1);
+    expect((await ctx.service.search("四半期")).results).toHaveLength(1);
 
     // both operations are idempotent
     expect((await ctx.service.publish(alice, report.id)).report.status).toBe("published");
@@ -171,8 +171,8 @@ describe("report lifecycle", () => {
     expect(second.report.status).toBe("published"); // 公開中の上書きは公開のまま
     expect(second.url).toBeDefined();
 
-    expect(await ctx.service.search("品川")).toHaveLength(0);
-    const osaka = await ctx.service.search("大阪支社");
+    expect((await ctx.service.search("品川")).results).toHaveLength(0);
+    const { results: osaka } = await ctx.service.search("大阪支社");
     expect(osaka).toHaveLength(1);
 
     // overwrite of a private report stays private
@@ -188,7 +188,7 @@ describe("report lifecycle", () => {
   test("delete removes meta, index, content and source", async () => {
     const { report } = await uploadPublished(alice, { title: "削除対象" }, html("d", "抹消される本文"));
     await ctx.service.delete(alice, report.id);
-    expect(await ctx.service.search("抹消")).toHaveLength(0);
+    expect((await ctx.service.search("抹消")).results).toHaveLength(0);
     expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
     expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).toBeNull();
     await expectDomainError(ctx.service.get(report.id), "not_found");
@@ -203,7 +203,7 @@ describe("report lifecycle", () => {
     expect(deleted).toBe(2);
     expect((await ctx.service.listMine(alice)).items).toHaveLength(0);
     await expectDomainError(ctx.service.get(priv.id, admin), "not_found");
-    expect(await ctx.service.search("アリス")).toHaveLength(0);
+    expect((await ctx.service.search("アリス")).results).toHaveLength(0);
     expect((await ctx.service.get(kept.id)).report.id).toBe(kept.id);
 
     await expectDomainError(ctx.service.adminDeleteByOwner(alice, bob.sub), "forbidden");
@@ -246,8 +246,8 @@ describe("direct HTML edit", () => {
     expect(edited.report.version).toBe(2);
     expect(edited.report.status).toBe("published");
     expect(edited.url).toBeDefined();
-    expect(await ctx.service.search("初版")).toHaveLength(0);
-    expect(await ctx.service.search("編集後")).toHaveLength(1);
+    expect((await ctx.service.search("初版")).results).toHaveLength(0);
+    expect((await ctx.service.search("編集後")).results).toHaveLength(1);
     const content = await ctx.storage.getContentObject(`reports/${report.id}/index.html`);
     expect(dec.decode(content!)).toContain("編集後のユニーク本文トークン");
   });
@@ -377,7 +377,7 @@ describe("verdict branching", () => {
     const published = await ctx.service.publish(alice, report.id);
     expect(published.report.status).toBe("published");
     expect(published.report.verdict).toBe("warn"); // scan outcome preserved for audit
-    expect(await ctx.service.search("要注意")).toHaveLength(1);
+    expect((await ctx.service.search("要注意")).results).toHaveLength(1);
   });
 
   test("block → rejected, sample retained in staging, nothing published", async () => {
@@ -397,7 +397,7 @@ describe("verdict branching", () => {
     // nothing in the content store, no source, no index entries
     expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
     expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).toBeNull();
-    expect(await ctx.service.search("悪性")).toHaveLength(0);
+    expect((await ctx.service.search("悪性")).results).toHaveLength(0);
     // staged sample retained for forensics
     expect(await ctx.storage.getStagingObject(up.key)).not.toBeNull();
   });
@@ -412,7 +412,7 @@ describe("verdict branching", () => {
 
     expect(second.report.status).toBe("rejected");
     expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
-    expect(await ctx.service.search("安全")).toHaveLength(0);
+    expect((await ctx.service.search("安全")).results).toHaveLength(0);
     await expectDomainError(ctx.service.get(report.id), "not_found");
   });
 });
@@ -452,11 +452,11 @@ describe("metadata update & reindex", () => {
     const { report } = await uploadPublished(alice, { title: "旧タイトル" }, html("t", "共通本文キーワード"));
     await ctx.service.update(alice, report.id, { title: "新章突入" });
 
-    expect(await ctx.service.search("旧タイトル")).toHaveLength(0);
-    const hits = await ctx.service.search("新章突入");
+    expect((await ctx.service.search("旧タイトル")).results).toHaveLength(0);
+    const { results: hits } = await ctx.service.search("新章突入");
     expect(hits).toHaveLength(1);
     // body tokens survive a metadata-only update
-    expect(await ctx.service.search("共通本文キーワード")).toHaveLength(1);
+    expect((await ctx.service.search("共通本文キーワード")).results).toHaveLength(1);
   });
 });
 
@@ -467,15 +467,53 @@ describe("search ranking", () => {
     expect(a.report.status).toBe("published");
     expect(b.report.status).toBe("published");
 
-    const hits = await ctx.service.search("監査ログ");
+    const { results: hits } = await ctx.service.search("監査ログ");
     expect(hits.map((h) => h.report.id)).toEqual([a.report.id, b.report.id]);
     expect(hits[0]!.score).toBeGreaterThan(hits[1]!.score);
 
     // "設計" only exists in A's title → full match ranks A first for combined query
-    const combined = await ctx.service.search("監査ログ 設計");
+    const { results: combined } = await ctx.service.search("監査ログ 設計");
     expect(combined[0]!.report.id).toBe(a.report.id);
     expect(combined[0]!.matchedAll).toBe(true);
     expect(combined[1]!.matchedAll).toBe(false);
+  });
+});
+
+describe("search pagination", () => {
+  test("offset cursor pages through the full ranking without overlap", async () => {
+    // updatedAt の同着で並びが揺れないよう、1秒ずつ進む固定クロックを使う
+    let tick = 0;
+    ctx = createLocalContext({
+      dataDir,
+      scanner: markerScanner,
+      now: () => new Date(Date.UTC(2026, 6, 12, 0, 0, tick++)),
+    });
+    const ids: string[] = [];
+    for (const title of ["共通語その一", "共通語その二", "共通語その三"]) {
+      const { report } = await uploadPublished(alice, { title }, html(title, "本文"));
+      ids.push(report.id);
+    }
+
+    const first = await ctx.service.search("共通語", { limit: 2 });
+    expect(first.results).toHaveLength(2);
+    expect(first.nextCursor).toBeDefined();
+
+    const second = await ctx.service.search("共通語", { limit: 2, cursor: first.nextCursor! });
+    expect(second.results).toHaveLength(1);
+    expect(second.nextCursor).toBeUndefined();
+
+    // ページをまたいで重複せず全件をカバーする
+    const seen = [...first.results, ...second.results].map((r) => r.report.id);
+    expect(new Set(seen).size).toBe(3);
+    expect([...seen].sort()).toEqual([...ids].sort());
+  });
+
+  test("invalid cursor → bad_request; no cursor on the final page", async () => {
+    await uploadPublished(alice, { title: "単独ヒット" }, html("t", "本文"));
+    await expectDomainError(ctx.service.search("単独ヒット", { cursor: "abc" }), "bad_request");
+    const page = await ctx.service.search("単独ヒット", { limit: 20 });
+    expect(page.results).toHaveLength(1);
+    expect(page.nextCursor).toBeUndefined();
   });
 });
 
@@ -548,7 +586,7 @@ describe("persistence", () => {
     const restarted = createLocalContext({ dataDir, scanner: markerScanner });
     const got = await restarted.service.get(report.id);
     expect(got.report.title).toBe("永続化テスト");
-    const hits = await restarted.service.search("再起動");
+    const { results: hits } = await restarted.service.search("再起動");
     expect(hits).toHaveLength(1);
   });
 });

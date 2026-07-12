@@ -22,6 +22,7 @@ import type {
   GetQuotaResponse,
   GetReportResponse,
   GetReportSourceResponse,
+  ListOrder,
   ListReportsResponse,
   MyReportsResponse,
   PublishReportResponse,
@@ -123,12 +124,18 @@ export class ApiClient {
     return this.request("GET", "/config");
   }
 
-  listReports(opts: { limit?: number; cursor?: string } = {}): Promise<ListReportsResponse> {
-    return this.request("GET", "/reports", { query: { limit: opts.limit, cursor: opts.cursor } });
+  listReports(
+    opts: { order?: ListOrder; kind?: ReportKind; limit?: number; cursor?: string } = {},
+  ): Promise<ListReportsResponse> {
+    return this.request("GET", "/reports", {
+      query: { order: opts.order, kind: opts.kind, limit: opts.limit, cursor: opts.cursor },
+    });
   }
 
-  search(q: string, limit?: number): Promise<SearchResponse> {
-    return this.request("GET", "/search", { query: { q, limit } });
+  search(q: string, opts: { limit?: number; cursor?: string } = {}): Promise<SearchResponse> {
+    return this.request("GET", "/search", {
+      query: { q, limit: opts.limit, cursor: opts.cursor },
+    });
   }
 
   getReport(id: string): Promise<GetReportResponse> {

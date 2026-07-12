@@ -185,6 +185,22 @@ describe("lists", () => {
     expect(client.inputsOf("QueryCommand")[1].ExclusiveStartKey).toEqual(lastKey);
   });
 
+  test("listPublished maps order=asc to ScanIndexForward and kind to a filter expression", async () => {
+    const client = new FakeClient().on("QueryCommand", () => ({ Items: [] }));
+    await repo(client).listPublished({ order: "asc", kind: "zip" });
+    const [input] = client.inputsOf("QueryCommand");
+    expect(input.ScanIndexForward).toBe(true);
+    expect(input.FilterExpression).toBe("#kind = :kind");
+    expect(input.ExpressionAttributeNames).toEqual({ "#kind": "kind" });
+    expect(input.ExpressionAttributeValues[":kind"]).toBe("zip");
+
+    // no kind / default order → no filter, descending
+    await repo(client).listPublished();
+    const second = client.inputsOf("QueryCommand")[1];
+    expect(second.ScanIndexForward).toBe(false);
+    expect(second.FilterExpression).toBeUndefined();
+  });
+
   test("listByOwner queries GSI2 by ownerSub", async () => {
     const client = new FakeClient().on("QueryCommand", () => ({ Items: [] }));
     const page = await repo(client).listByOwner("user-9");
