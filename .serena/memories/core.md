@@ -26,4 +26,6 @@ HTML Report Box — 単一 HTML レポートの社内共有ホスティング。
 - **検索**: DynamoDB 転置インデックス（OpenSearch 不使用）。重み: タイトル+8 / 説明+4 / 本文+1
 - エラーは常に `{error:{code,message}}`、`DomainError.httpStatus` がステータス決定。ルート保護は宣言的（public / requireAuth / requireAdmin）
 
-技術スタックとバージョン: `mem:tech_stack`。開発コマンド: `mem:suggested_commands`。コード規約: `mem:conventions`。完了時チェック: `mem:task_completion`。Google 認証: `mem:google_auth`。
+- **ホスト先選択（2026-07-12 追加）**: `HRB_TARGET`（dev / vps / aws）で選択。vps は local アダプタの本番昇格（2 リスナーでオリジン分離・x-dev-user 無効・MCP キー必須）。content CSP は `packages/shared/src/content-csp.ts` に一元化。presign 契約は method(post|put) 汎用形。`core/src/conformance/` に ports 契約スイート。詳細: `mem:deployment`、ユーザー向け: `docs/DEPLOYMENT.md`
+
+技術スタックとバージョン: `mem:tech_stack`。デプロイ/ホスト先: `mem:deployment`。開発コマンド: `mem:suggested_commands`。コード規約: `mem:conventions`。完了時チェック: `mem:task_completion`。Google 認証: `mem:google_auth`。

@@ -6,7 +6,7 @@
 - HTTP: Hono（ローカル Bun サーバーと Lambda 両対応）。express 不使用
 - フロント: React + react-router + TanStack Query、Bun HTML imports でバンドル（Vite 不使用）
 - バリデーション: zod（`packages/shared` に集約）
-- スキャナ: parse5（HTML パース）、yauzl（zip 検査）、テスト検体生成に fflate
+- スキャナ: parse5（HTML パース）、fflate + 自前 CDR パーサ（zip 検査。yauzl は 2026-07-12 に置換、Node streams 非依存で WinterCG 互換）、テスト検体生成も fflate
 - テスト: `bun:test`（`import { test, expect } from "bun:test"`）
 - IaC: AWS CDK（Lambda は Node 22 ランタイム想定）。デプロイは未実施
 - 本番想定 AWS: S3 / CloudFront / API Gateway / Lambda / DynamoDB / Cognito — ローカルでは `core/src/local/` アダプタ + `.local-data/` で代替

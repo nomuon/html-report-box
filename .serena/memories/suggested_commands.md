@@ -4,6 +4,7 @@
 bun install                          # 依存導入
 bun run seed                         # サンプルレポート3件を .local-data/ に投入
 bun run dev                          # dev サーバー http://localhost:3000（--hot、実体: packages/api/src/local/server.ts）
+bun run start                        # --hot なし起動。HRB_TARGET=vps で VPS 本番モード（mem:deployment）
 
 bun run typecheck                    # 全パッケージ tsc --noEmit
 bun test                             # 全 unit/integration テスト

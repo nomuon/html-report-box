@@ -1,6 +1,6 @@
 # Conventions
 
-- **Ports & Adapters を崩さない**: 新しい外部依存は必ず `core/src/ports.ts` に IF を切り、`core/src/local/` と `core/src/aws/` の両実装を用意する
+- **Ports & Adapters を崩さない**: 新しい外部依存は必ず `core/src/ports.ts` に IF を切り、`core/src/local/` と `core/src/aws/` の両実装を用意する。アダプタを追加/変更したら `core/src/conformance/` の契約スイートを通すこと（スイートはプロダクションコードを import しない）
 - **Bun API の使用範囲**: `core/src/local/`・`api/src/local/`・`packages/web`・scripts のみ。Lambda 搭載コード（shared/core 本体/scanner/api/mcp）は Node 22 互換 API のみ
 - **エラー**: `DomainError`（`core/src/errors.ts`）を投げる。HTTP レスポンスは常に `{error:{code,message}}`、ステータスは `DomainError.httpStatus` 由来。生 throw や独自エラー形式を作らない
 - **ルート保護は宣言的**: public / `requireAuth` / `requireAdmin` のいずれかを明示
