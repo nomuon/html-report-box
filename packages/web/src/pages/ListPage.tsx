@@ -5,7 +5,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import type { ListOrder, PublicReport, ReportKind } from "@hrb/shared";
 import { useApp } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
-import { KindChip, StatusChip } from "../components/Chip.tsx";
+import { KindChip, StatusChip, TagList } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Highlight } from "../components/Highlight.tsx";
 import { Icon } from "../components/Icon.tsx";
@@ -23,7 +23,15 @@ function getStoredView(): ViewMode {
   }
 }
 
-function ReportTable({ reports, query }: { reports: PublicReport[]; query?: string }) {
+function ReportTable({
+  reports,
+  query,
+  onTagClick,
+}: {
+  reports: PublicReport[];
+  query?: string;
+  onTagClick: (tag: string) => void;
+}) {
   const navigate = useNavigate();
   return (
     <div className="hrb-table-wrap">
@@ -41,13 +49,16 @@ function ReportTable({ reports, query }: { reports: PublicReport[]; query?: stri
           {reports.map((r) => (
             <tr key={r.id} className="hrb-table__row" onClick={() => navigate(`/reports/${r.id}`)}>
               <td>
-                <Link
-                  to={`/reports/${r.id}`}
-                  className="hrb-table__title"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Highlight text={r.title} query={query} />
-                </Link>
+                <span className="hrb-table__title-cell">
+                  <Link
+                    to={`/reports/${r.id}`}
+                    className="hrb-table__title"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Highlight text={r.title} query={query} />
+                  </Link>
+                  <TagList tags={r.tags} onTagClick={onTagClick} />
+                </span>
               </td>
               <td>{r.ownerName}</td>
               <td className="hrb-table__date">{formatDateTime(r.updatedAt)}</td>
@@ -65,7 +76,15 @@ function ReportTable({ reports, query }: { reports: PublicReport[]; query?: stri
   );
 }
 
-function ReportCards({ reports, query }: { reports: PublicReport[]; query?: string }) {
+function ReportCards({
+  reports,
+  query,
+  onTagClick,
+}: {
+  reports: PublicReport[];
+  query?: string;
+  onTagClick: (tag: string) => void;
+}) {
   const navigate = useNavigate();
   return (
     <div className="hrb-cards">
@@ -88,6 +107,7 @@ function ReportCards({ reports, query }: { reports: PublicReport[]; query?: stri
               <Highlight text={r.description} query={query} />
             </p>
           )}
+          <TagList tags={r.tags} onTagClick={onTagClick} />
           <div className="hrb-card__meta">
             <span>{r.ownerName}</span>
             <span className="hrb-card__date">{formatDateTime(r.updatedAt)}</span>
@@ -162,31 +182,47 @@ export function ListPage() {
   const isSearch = location.pathname === "/search";
   const q = isSearch ? (params.get("q") ?? "").trim() : "";
 
-  // ソート・種類フィルタは URL クエリ（?order=&kind=）と同期する
+  // ソート・種類・タグフィルタは URL クエリ（?order=&kind=&tag=）と同期する
   // （リロード・URL 共有で状態が維持される）。デフォルト値はクエリから省く。
   const order: ListOrder = params.get("order") === "asc" ? "asc" : "desc";
   const kindParam = params.get("kind");
   const kind: ReportKind | undefined =
     kindParam === "html" || kindParam === "zip" ? kindParam : undefined;
+  const tagParam = params.get("tag")?.trim();
+  const tag: string | undefined = tagParam ? tagParam : undefined;
 
-  const updateListParams = (next: { order?: ListOrder; kind?: ReportKind | undefined }) => {
+  const updateListParams = (next: {
+    order?: ListOrder;
+    kind?: ReportKind | undefined;
+    tag?: string | undefined;
+  }) => {
     const p = new URLSearchParams(params);
     const nextOrder = "order" in next ? next.order : order;
     const nextKind = "kind" in next ? next.kind : kind;
+    const nextTag = "tag" in next ? next.tag : tag;
     if (nextOrder === "asc") p.set("order", "asc");
     else p.delete("order");
     if (nextKind !== undefined) p.set("kind", nextKind);
     else p.delete("kind");
+    if (nextTag !== undefined) p.set("tag", nextTag);
+    else p.delete("tag");
     setParams(p, { replace: true });
   };
 
+  // タグチップのクリック: 一覧なら ?tag= で絞り込み、検索結果からは一覧へ移動して絞り込む
+  const filterByTag = (t: string) => {
+    if (isSearch) navigate(`/?tag=${encodeURIComponent(t)}`);
+    else updateListParams({ tag: t });
+  };
+
   const listQuery = useInfiniteQuery({
-    queryKey: ["reports", order, kind ?? "all"],
+    queryKey: ["reports", order, kind ?? "all", tag ?? ""],
     queryFn: ({ pageParam }) =>
       api.listReports({
         cursor: pageParam,
         ...(order === "asc" ? { order } : {}),
         ...(kind !== undefined ? { kind } : {}),
+        ...(tag !== undefined ? { tag } : {}),
       }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor,
@@ -237,6 +273,17 @@ export function ListPage() {
       {!isSearch && (
         <div className="hrb-list-controls">
           <KindFilter kind={kind} onChange={(k) => updateListParams({ kind: k })} />
+          {tag !== undefined && (
+            <button
+              type="button"
+              className="hrb-filter-chip hrb-filter-chip--active hrb-filter-chip--tag"
+              aria-label={`タグ「${tag}」の絞り込みを解除`}
+              onClick={() => updateListParams({ tag: undefined })}
+            >
+              タグ: {tag}
+              <Icon name="x" size={12} />
+            </button>
+          )}
           <select
             className="hrb-select"
             aria-label="並び順"
@@ -257,7 +304,7 @@ export function ListPage() {
             icon={<Icon name="search" size={30} />}
             title={`「${q}」に一致するレポートは見つかりませんでした`}
           />
-        ) : kind !== undefined ? (
+        ) : kind !== undefined || tag !== undefined ? (
           <EmptyState
             icon={<Icon name="inbox" size={30} />}
             title="条件に一致するレポートがありません"
@@ -273,9 +320,9 @@ export function ListPage() {
 
       {reports.length > 0 &&
         (view === "table" ? (
-          <ReportTable reports={reports} query={isSearch ? q : undefined} />
+          <ReportTable reports={reports} query={isSearch ? q : undefined} onTagClick={filterByTag} />
         ) : (
-          <ReportCards reports={reports} query={isSearch ? q : undefined} />
+          <ReportCards reports={reports} query={isSearch ? q : undefined} onTagClick={filterByTag} />
         ))}
 
       {pager.hasNextPage && (

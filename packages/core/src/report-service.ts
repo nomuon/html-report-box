@@ -206,7 +206,7 @@ export class ReportService {
 
   async create(
     user: AuthUser,
-    input: { title: string; description?: string; kind: ReportKind },
+    input: { title: string; description?: string; tags?: string[]; kind: ReportKind },
     audit?: AuditInfo,
   ): Promise<{ report: ReportMeta; upload: PresignedUpload }> {
     const request: CreateReportRequest = parseOrThrow(CreateReportRequestSchema, input, "report");
@@ -218,6 +218,7 @@ export class ReportService {
       id,
       title: request.title,
       description: request.description,
+      tags: request.tags,
       ownerSub: user.sub,
       ownerName: user.name,
       status: "private",
@@ -243,12 +244,12 @@ export class ReportService {
    */
   async createFromHtml(
     user: AuthUser,
-    input: { title: string; description?: string; html: string },
+    input: { title: string; description?: string; tags?: string[]; html: string },
     audit?: AuditInfo,
   ): Promise<{ report: ReportMeta; url?: string }> {
     const request: CreateReportRequest = parseOrThrow(
       CreateReportRequestSchema,
-      { title: input.title, description: input.description, kind: "html" },
+      { title: input.title, description: input.description, tags: input.tags, kind: "html" },
       "report",
     );
     const data = new TextEncoder().encode(input.html);
@@ -266,6 +267,7 @@ export class ReportService {
       id,
       title: request.title,
       description: request.description,
+      tags: request.tags,
       ownerSub: user.sub,
       ownerName: user.name,
       status: "private",
@@ -537,10 +539,11 @@ export class ReportService {
     this.assertOwnerOrAdmin(user, meta);
     if (request.title !== undefined) meta.title = request.title;
     if (request.description !== undefined) meta.description = request.description;
+    if (request.tags !== undefined) meta.tags = request.tags;
     meta.updatedAt = this.now().toISOString();
     await this.repo.update(meta);
     if (meta.status === "published") {
-      // Title/description carry index weight — rebuild postings.
+      // Title/description/tags carry index weight — rebuild postings.
       const extracted = await this.storage.getContentObject(
         `reports/${id}/${EXTRACTED_TEXT_FILENAME}`,
       );
@@ -730,6 +733,8 @@ export class ReportService {
     const postings = buildDocumentTokens({
       title: meta.title,
       description: meta.description,
+      // tags を持たない既存データは空として扱う（後方互換）。
+      tags: meta.tags ?? [],
       body: bodyText,
     });
     await this.searchIndex.put(meta.id, postings, meta.updatedAt);

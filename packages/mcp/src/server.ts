@@ -13,6 +13,8 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import {
   REPORT_DESCRIPTION_MAX,
+  REPORT_TAG_MAX,
+  REPORT_TAGS_MAX,
   REPORT_TITLE_MAX,
   SEARCH_QUERY_MAX,
   toPublicReport,
@@ -105,6 +107,7 @@ export function buildMcpServer(ctx: McpContext, auth: McpAuth = { user: null }):
           id: r.report.id,
           title: r.report.title,
           description: r.report.description,
+          tags: r.report.tags,
           ownerName: r.report.ownerName,
           kind: r.report.kind,
           updatedAt: r.report.updatedAt,
@@ -192,15 +195,24 @@ export function buildMcpServer(ctx: McpContext, auth: McpAuth = { user: null }):
           .max(REPORT_DESCRIPTION_MAX)
           .optional()
           .describe("Optional short description"),
+        tags: z
+          .array(z.string().trim().min(1).max(REPORT_TAG_MAX))
+          .max(REPORT_TAGS_MAX)
+          .optional()
+          .describe(
+            `Optional tags for organizing / filtering (max ${REPORT_TAGS_MAX}, ` +
+              `each up to ${REPORT_TAG_MAX} chars; duplicates are dropped)`,
+          ),
         html: z.string().min(1).describe("Full HTML document to upload"),
       },
     },
-    async ({ title, description, html }) =>
+    async ({ title, description, tags, html }) =>
       runTool(async () => {
         const owner = mustUser();
         const { report } = await reportService.createFromHtml(owner, {
           title,
           ...(description !== undefined ? { description } : {}),
+          ...(tags !== undefined ? { tags } : {}),
           html,
         });
         return jsonResult({

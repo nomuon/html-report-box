@@ -10,6 +10,7 @@ import { EmptyState } from "../components/EmptyState.tsx";
 import { FindingsList } from "../components/FindingsList.tsx";
 import { LoginModal } from "../components/Header.tsx";
 import { Icon } from "../components/Icon.tsx";
+import { TagInput } from "../components/TagInput.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { extractHtmlTitle, titleFromFilename } from "../lib/html-title.ts";
 import { UploadAbortedError, uploadToPresigned } from "../lib/upload.ts";
@@ -26,6 +27,7 @@ export function UploadPage() {
   const [state, dispatch] = useReducer(dropzoneReducer, DROPZONE_INITIAL);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   // アップロード完了後に「公開する」を押したときの共有URL
@@ -94,6 +96,7 @@ export function UploadPage() {
       const created = await api.createReport({
         title: title.trim(),
         description: description.trim(),
+        tags,
         kind: state.file.kind,
       });
       createdId = created.report.id;
@@ -138,6 +141,7 @@ export function UploadPage() {
     fileRef.current = null;
     setTitle("");
     setDescription("");
+    setTags([]);
     setPublishedUrl(null);
     dispatch({ type: "RESET" });
   };
@@ -289,6 +293,10 @@ export function UploadPage() {
               maxLength={2000}
             />
           </label>
+          <div className="hrb-field">
+            <span className="hrb-field__label">タグ（任意）</span>
+            <TagInput tags={tags} onChange={setTags} />
+          </div>
           <div className="hrb-upload-form__actions">
             <Button type="submit" loading={busy} disabled={!title.trim()}>
               アップロード

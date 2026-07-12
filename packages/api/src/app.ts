@@ -219,6 +219,7 @@ export function createApp(ctx: AppContext): AppType {
       ...pageOptions(query),
       ...(query.order !== undefined ? { order: query.order } : {}),
       ...(query.kind !== undefined ? { kind: query.kind } : {}),
+      ...(query.tag !== undefined ? { tag: query.tag } : {}),
     });
     return c.json({
       reports: page.items.map(toPublicReport),

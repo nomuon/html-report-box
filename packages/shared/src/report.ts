@@ -70,15 +70,39 @@ export type ReportId = z.infer<typeof ReportIdSchema>;
 // ---- Field limits ----
 export const REPORT_TITLE_MAX = 200;
 export const REPORT_DESCRIPTION_MAX = 2000;
+export const REPORT_TAGS_MAX = 10;
+export const REPORT_TAG_MAX = 30;
 
 export const ReportTitleSchema = z.string().trim().min(1).max(REPORT_TITLE_MAX);
 export const ReportDescriptionSchema = z.string().trim().max(REPORT_DESCRIPTION_MAX);
+
+/**
+ * タグ配列の正規化: 各タグを trim → 空文字を除外 → 重複を除去。
+ * 各タグは最大 REPORT_TAG_MAX 文字、正規化後は最大 REPORT_TAGS_MAX 個。
+ */
+export const ReportTagsSchema = z
+  .array(z.string().trim().max(REPORT_TAG_MAX))
+  .transform((tags) => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const tag of tags) {
+      if (tag.length === 0 || seen.has(tag)) continue;
+      seen.add(tag);
+      out.push(tag);
+    }
+    return out;
+  })
+  .refine((tags) => tags.length <= REPORT_TAGS_MAX, {
+    message: `at most ${REPORT_TAGS_MAX} tags are allowed`,
+  });
 
 // ---- Full report metadata (internal record; DynamoDB META item shape) ----
 export const ReportMetaSchema = z.object({
   id: ReportIdSchema,
   title: ReportTitleSchema,
   description: ReportDescriptionSchema.default(""),
+  /** 整理用タグ（正規化済み）。tags を持たない既存データは空として扱う（後方互換）。 */
+  tags: ReportTagsSchema.default([]),
   /** Cognito sub (or dev user id in local mode) of the owner. */
   ownerSub: z.string().min(1),
   /** Display name denormalized from the IdP at upload time. */

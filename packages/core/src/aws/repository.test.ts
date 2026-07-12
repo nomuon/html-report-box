@@ -26,6 +26,7 @@ function sampleMeta(overrides: Partial<ReportMeta> = {}): ReportMeta {
     id: "abcdefghijklmnopqrstu",
     title: "Q2 sales report",
     description: "",
+    tags: [],
     ownerSub: "user-1",
     ownerName: "Alice",
     status: "private",
@@ -200,6 +201,20 @@ describe("lists", () => {
     const second = client.inputsOf("QueryCommand")[1];
     expect(second.ScanIndexForward).toBe(false);
     expect(second.FilterExpression).toBeUndefined();
+  });
+
+  test("listPublished maps tag to a contains() filter (combinable with kind)", async () => {
+    const client = new FakeClient().on("QueryCommand", () => ({ Items: [] }));
+    await repo(client).listPublished({ tag: "月次" });
+    const [tagOnly] = client.inputsOf("QueryCommand");
+    expect(tagOnly.FilterExpression).toBe("contains(#tags, :tag)");
+    expect(tagOnly.ExpressionAttributeNames).toEqual({ "#tags": "tags" });
+    expect(tagOnly.ExpressionAttributeValues[":tag"]).toBe("月次");
+
+    await repo(client).listPublished({ kind: "html", tag: "月次" });
+    const both = client.inputsOf("QueryCommand")[1];
+    expect(both.FilterExpression).toBe("#kind = :kind AND contains(#tags, :tag)");
+    expect(both.ExpressionAttributeNames).toEqual({ "#kind": "kind", "#tags": "tags" });
   });
 
   test("listByOwner queries GSI2 by ownerSub", async () => {

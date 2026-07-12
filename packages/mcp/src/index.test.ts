@@ -328,6 +328,37 @@ describe("per-user API keys and write tools", () => {
     expect(unpublished.status).toBe("private");
   });
 
+  test("upload_report accepts tags: normalized, visible via get_report, searchable after publish", async () => {
+    const uploaded = parseToolJson(
+      await callToolWith(wapp, bearer, "upload_report", {
+        title: "タグ付き MCP レポート",
+        tags: [" ぶどう ", "ぶどう", "経理"],
+        html: page("タグ付き MCP レポート", "タグ検証の本文です。"),
+      }),
+    );
+    expect(uploaded.status).toBe("private");
+
+    // 正規化されたタグがメタに載る
+    const own = parseToolJson(await callToolWith(wapp, bearer, "get_report", { id: uploaded.id }));
+    expect(own.report.tags).toEqual(["ぶどう", "経理"]);
+
+    // 公開するとタグ語でも検索でヒットする（重み6）
+    await callToolWith(wapp, bearer, "publish_report", { id: uploaded.id });
+    const searched = parseToolJson(
+      await callToolWith(wapp, bearer, "search_reports", { query: "ぶどう" }),
+    );
+    expect(searched.results.map((r: any) => r.id)).toContain(uploaded.id);
+    expect(searched.results[0].tags).toEqual(["ぶどう", "経理"]);
+
+    // 上限超過はツールエラー
+    const tooMany = await callToolWith(wapp, bearer, "upload_report", {
+      title: "t",
+      tags: Array.from({ length: 11 }, (_, i) => `t${i}`),
+      html: page("t", "x"),
+    });
+    expect(tooMany.isError).toBe(true);
+  });
+
   test("publish_report visibility=unlisted: link-only — get works anonymously, list/search stay empty", async () => {
     const uploaded = parseToolJson(
       await callToolWith(wapp, bearer, "upload_report", {

@@ -14,6 +14,7 @@ import { DropZone } from "./DropZone.tsx";
 import { FindingsList } from "./FindingsList.tsx";
 import { Icon } from "./Icon.tsx";
 import { Modal } from "./Modal.tsx";
+import { TagInput } from "./TagInput.tsx";
 import { useToast } from "./Toast.tsx";
 
 function useInvalidateReports() {
@@ -33,7 +34,7 @@ export function EditReportModal({
   open,
   onClose,
 }: {
-  report: Pick<OwnedReport, "id" | "title" | "description">;
+  report: Pick<OwnedReport, "id" | "title" | "description" | "tags">;
   open: boolean;
   onClose: () => void;
 }) {
@@ -42,13 +43,14 @@ export function EditReportModal({
   const invalidate = useInvalidateReports();
   const [title, setTitle] = useState(report.title);
   const [description, setDescription] = useState(report.description);
+  const [tags, setTags] = useState<string[]>(report.tags);
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
     if (!title.trim()) return;
     setBusy(true);
     try {
-      await api.updateReport(report.id, { title: title.trim(), description: description.trim() });
+      await api.updateReport(report.id, { title: title.trim(), description: description.trim(), tags });
       invalidate(report.id);
       toast.push("success", "変更を保存しました");
       onClose();
@@ -62,7 +64,7 @@ export function EditReportModal({
   return (
     <Modal
       open={open}
-      title="タイトル・説明を編集"
+      title="タイトル・説明・タグを編集"
       onClose={onClose}
       footer={
         <>
@@ -89,6 +91,10 @@ export function EditReportModal({
           onChange={(e) => setDescription(e.target.value)}
         />
       </label>
+      <div className="hrb-field">
+        <span className="hrb-field__label">タグ</span>
+        <TagInput tags={tags} onChange={setTags} />
+      </div>
     </Modal>
   );
 }

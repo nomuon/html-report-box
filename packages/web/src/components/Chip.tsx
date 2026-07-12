@@ -29,6 +29,37 @@ export function KindChip({ kind }: { kind: ReportKind }) {
   return <span className="hrb-chip hrb-chip--kind">{kind === "html" ? "HTML" : "ZIP"}</span>;
 }
 
+/** タグチップ。onClick 付きならタグ絞り込みボタンとして描画する。 */
+export function TagChip({ tag, onClick }: { tag: string; onClick?: (tag: string) => void }) {
+  if (!onClick) return <span className="hrb-chip hrb-chip--tag">{tag}</span>;
+  return (
+    <button
+      type="button"
+      className="hrb-chip hrb-chip--tag hrb-chip--tag-btn"
+      aria-label={`タグ「${tag}」で絞り込む`}
+      onClick={(e) => {
+        // 行クリックのナビゲーションより優先する
+        e.stopPropagation();
+        onClick(tag);
+      }}
+    >
+      {tag}
+    </button>
+  );
+}
+
+/** タグチップの横並びリスト。tags が空なら何も描画しない。 */
+export function TagList({ tags, onTagClick }: { tags: string[]; onTagClick?: (tag: string) => void }) {
+  if (tags.length === 0) return null;
+  return (
+    <span className="hrb-tag-list">
+      {tags.map((t) => (
+        <TagChip key={t} tag={t} {...(onTagClick ? { onClick: onTagClick } : {})} />
+      ))}
+    </span>
+  );
+}
+
 const VERDICT_LABELS: Record<ScanVerdict, string> = {
   pass: "パス",
   warn: "注意",

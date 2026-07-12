@@ -4,12 +4,12 @@
  * ソースを srcdoc で埋め込む（非公開プレビュー）。
  */
 import { useState } from "react";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { scanFindingSummary } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
-import { StatusChip } from "../components/Chip.tsx";
+import { StatusChip, TagList } from "../components/Chip.tsx";
 import { useCopyUrl } from "../components/CopyUrlRow.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
@@ -83,6 +83,7 @@ export function ReportDetailPage() {
   const { id = "" } = useParams();
   const { api } = useApp();
   const session = useSession();
+  const navigate = useNavigate();
   const copyUrl = useCopyUrl();
   const [modal, setModal] = useState<ModalState>(null);
 
@@ -153,6 +154,10 @@ export function ReportDetailPage() {
                 <StatusChip status={report.status} />
               </>
             )}
+            <TagList
+              tags={report.tags}
+              onTagClick={(t) => navigate(`/?tag=${encodeURIComponent(t)}`)}
+            />
           </div>
         </div>
         <div className="hrb-detail__actions">
@@ -184,7 +189,7 @@ export function ReportDetailPage() {
               </Button>
               <Button variant="secondary" onClick={() => setModal("edit-meta")}>
                 <Icon name="pencil" size={16} />
-                タイトル・説明
+                タイトル・説明・タグ
               </Button>
               <Button variant="secondary" onClick={() => setModal("versions")}>
                 <Icon name="clock" size={16} />
@@ -253,7 +258,12 @@ export function ReportDetailPage() {
           />
           <EditReportModal
             key={`meta-${report.id}-${modal === "edit-meta"}`}
-            report={{ id: report.id, title: report.title, description: report.description }}
+            report={{
+              id: report.id,
+              title: report.title,
+              description: report.description,
+              tags: report.tags,
+            }}
             open={modal === "edit-meta"}
             onClose={() => setModal(null)}
           />

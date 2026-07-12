@@ -7,7 +7,7 @@ import { scanFindingSummary } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
 import { ApiKeysSection } from "../components/ApiKeysSection.tsx";
 import { Button } from "../components/Button.tsx";
-import { StatusChip } from "../components/Chip.tsx";
+import { StatusChip, TagList } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { PublishToggle } from "../components/PublishToggle.tsx";
@@ -82,9 +82,12 @@ export function MinePage() {
               {reports.map((r) => (
                 <tr key={r.id} className={r.status === "rejected" ? "hrb-table__row--rejected" : ""}>
                   <td>
-                    <Link to={`/reports/${r.id}`} className="hrb-table__title">
-                      {r.title}
-                    </Link>
+                    <span className="hrb-table__title-cell">
+                      <Link to={`/reports/${r.id}`} className="hrb-table__title">
+                        {r.title}
+                      </Link>
+                      <TagList tags={r.tags} />
+                    </span>
                   </td>
                   <td>
                     <span className="hrb-status-cell">
@@ -138,8 +141,8 @@ export function MinePage() {
                       <button
                         type="button"
                         className="hrb-icon-btn hrb-tip"
-                        data-tip="タイトル・説明を編集"
-                        aria-label="タイトル・説明を編集"
+                        data-tip="タイトル・説明・タグを編集"
+                        aria-label="タイトル・説明・タグを編集"
                         onClick={() => setModal({ type: "edit", report: r })}
                       >
                         <Icon name="pencil" size={16} />

@@ -26,6 +26,7 @@ function makeMeta(id: string, over: Partial<ReportMeta> = {}): ReportMeta {
     id,
     title: "タイトル",
     description: "",
+    tags: [],
     ownerSub: "user-alice",
     ownerName: "Alice",
     status: "private",
@@ -150,6 +151,20 @@ export function runRepositoryConformance(name: string, factory: RepositoryFactor
         2,
       );
       expect(htmlAsc.map((m) => m.id)).toEqual([rid("k1"), rid("k3")]);
+    });
+
+    test("listPublished supports a single exact tag filter", async () => {
+      const repo = await factory();
+      await repo.create(makeMeta(rid("t1"), { status: "published", tags: ["月次", "営業"], updatedAt: "2026-07-01T00:00:00.000Z" }));
+      await repo.create(makeMeta(rid("t2"), { status: "published", tags: ["週次"], updatedAt: "2026-07-02T00:00:00.000Z" }));
+      await repo.create(makeMeta(rid("t3"), { status: "published", updatedAt: "2026-07-03T00:00:00.000Z" }));
+      await repo.create(makeMeta(rid("t4"), { status: "private", tags: ["月次"], updatedAt: "2026-07-04T00:00:00.000Z" }));
+
+      const monthly = await drain((opts) => repo.listPublished({ ...opts, tag: "月次" }), 2);
+      expect(monthly.map((m) => m.id)).toEqual([rid("t1")]);
+      // 完全一致のみ（部分一致では絞り込まれない）
+      const partial = await drain((opts) => repo.listPublished({ ...opts, tag: "月" }), 2);
+      expect(partial).toEqual([]);
     });
 
     test("listByOwner returns all statuses for one owner, newest first", async () => {

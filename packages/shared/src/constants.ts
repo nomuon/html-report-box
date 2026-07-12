@@ -74,6 +74,7 @@ export function isAllowedStyleHost(host: string): boolean {
 
 // ---- Search / tokenizer ----
 export const TOKEN_WEIGHT_TITLE = 8;
+export const TOKEN_WEIGHT_TAG = 6;
 export const TOKEN_WEIGHT_DESCRIPTION = 4;
 export const TOKEN_WEIGHT_BODY = 1;
 /** Max distinct tokens indexed per document. */

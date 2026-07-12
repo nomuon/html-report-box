@@ -10,8 +10,10 @@ import {
   PublicReportSchema,
   ReportDescriptionSchema,
   ReportFlagSchema,
+  REPORT_TAG_MAX,
   ReportKindSchema,
   ReportStatusSchema,
+  ReportTagsSchema,
   ReportTitleSchema,
   ReportVersionSchema,
   ScanFindingSchema,
@@ -165,6 +167,8 @@ export type ListOrder = z.infer<typeof ListOrderSchema>;
 export const ListReportsQuerySchema = PaginationQuerySchema.extend({
   order: ListOrderSchema.optional(),
   kind: ReportKindSchema.optional(),
+  /** 単一タグの完全一致絞り込み。 */
+  tag: z.string().trim().min(1).max(REPORT_TAG_MAX).optional(),
 });
 export type ListReportsQuery = z.infer<typeof ListReportsQuerySchema>;
 
@@ -243,6 +247,7 @@ export type GetQuotaResponse = z.infer<typeof GetQuotaResponseSchema>;
 export const CreateReportRequestSchema = z.object({
   title: ReportTitleSchema,
   description: ReportDescriptionSchema.default(""),
+  tags: ReportTagsSchema.default([]),
   kind: ReportKindSchema,
 });
 export type CreateReportRequest = z.infer<typeof CreateReportRequestSchema>;
@@ -291,9 +296,11 @@ export const UpdateReportRequestSchema = z
   .object({
     title: ReportTitleSchema.optional(),
     description: ReportDescriptionSchema.optional(),
+    /** 省略時は変更なし（[] を渡すと全削除）。 */
+    tags: ReportTagsSchema.optional(),
   })
-  .refine((v) => v.title !== undefined || v.description !== undefined, {
-    message: "at least one of title/description is required",
+  .refine((v) => v.title !== undefined || v.description !== undefined || v.tags !== undefined, {
+    message: "at least one of title/description/tags is required",
   });
 export type UpdateReportRequest = z.infer<typeof UpdateReportRequestSchema>;
 

@@ -102,7 +102,13 @@ export class LocalReportRepository implements ReportRepository {
 
   async listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>> {
     const all = Object.values(this.store.get().reports)
-      .filter((m) => m.status === "published" && (opts?.kind === undefined || m.kind === opts.kind))
+      .filter(
+        (m) =>
+          m.status === "published" &&
+          (opts?.kind === undefined || m.kind === opts.kind) &&
+          // tags を持たない旧レコードは空扱い（後方互換）
+          (opts?.tag === undefined || (m.tags ?? []).includes(opts.tag)),
+      )
       .sort(byUpdatedAtDesc)
       .map((m) => structuredClone(m));
     if (opts?.order === "asc") all.reverse();

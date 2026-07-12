@@ -54,8 +54,10 @@ describe("ApiClient", () => {
     expect(calls[2]?.url).toBe("/api/reports?limit=10&cursor=abc");
     await client.listReports({ order: "asc", kind: "zip", limit: 10 });
     expect(calls[3]?.url).toBe("/api/reports?order=asc&kind=zip&limit=10");
+    await client.listReports({ tag: "月次" });
+    expect(calls[4]?.url).toBe(`/api/reports?${new URLSearchParams({ tag: "月次" })}`);
     await client.listReports();
-    expect(calls[4]?.url).toBe("/api/reports");
+    expect(calls[5]?.url).toBe("/api/reports");
   });
 
   test("POST bodies are JSON with content-type", async () => {

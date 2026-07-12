@@ -223,23 +223,35 @@ export class DynamoReportRepository implements ReportRepository {
 
   /**
    * GSI1 is keyed on updatedAt, so `order` maps directly to ScanIndexForward.
-   * `kind` is not part of any index key — it is applied as a FilterExpression,
-   * and DynamoDB evaluates Limit BEFORE the filter, so a filtered page may
-   * come back short (even empty) while nextCursor still advances. Callers
-   * simply keep paging; the filter itself is exact.
+   * `kind` / `tag` are not part of any index key — they are applied as a
+   * FilterExpression (tag via contains() on the tags list), and DynamoDB
+   * evaluates Limit BEFORE the filter, so a filtered page may come back short
+   * (even empty) while nextCursor still advances. Callers simply keep paging;
+   * the filter itself is exact.
+   * TODO: if tag filtering becomes hot, promote tags into a dedicated GSI.
    */
   async listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>> {
+    const filters: string[] = [];
+    const names: Record<string, string> = {};
+    const values: Record<string, unknown> = { ":pub": GSI1_PUBLISHED_PK };
+    if (opts?.kind) {
+      filters.push("#kind = :kind");
+      names["#kind"] = "kind";
+      values[":kind"] = opts.kind;
+    }
+    if (opts?.tag) {
+      filters.push("contains(#tags, :tag)");
+      names["#tags"] = "tags";
+      values[":tag"] = opts.tag;
+    }
     const res = await this.client.send(
       new QueryCommand({
         TableName: this.tableName,
         IndexName: GSI1_NAME,
         KeyConditionExpression: "gsi1pk = :pub",
-        ...(opts?.kind ? { FilterExpression: "#kind = :kind" } : {}),
-        ...(opts?.kind ? { ExpressionAttributeNames: { "#kind": "kind" } } : {}),
-        ExpressionAttributeValues: {
-          ":pub": GSI1_PUBLISHED_PK,
-          ...(opts?.kind ? { ":kind": opts.kind } : {}),
-        },
+        ...(filters.length > 0 ? { FilterExpression: filters.join(" AND ") } : {}),
+        ...(filters.length > 0 ? { ExpressionAttributeNames: names } : {}),
+        ExpressionAttributeValues: values,
         ScanIndexForward: opts?.order === "asc", // updatedAt descending by default
         Limit: opts?.limit ?? DEFAULT_PAGE_LIMIT,
         ...(opts?.cursor ? { ExclusiveStartKey: decodeKeyCursor(opts.cursor) } : {}),

@@ -4,6 +4,7 @@ import {
   MAX_TOKENS_PER_DOCUMENT,
   TOKEN_WEIGHT_BODY,
   TOKEN_WEIGHT_DESCRIPTION,
+  TOKEN_WEIGHT_TAG,
   TOKEN_WEIGHT_TITLE,
 } from "./constants.ts";
 import {
@@ -143,6 +144,26 @@ describe("buildDocumentTokens", () => {
   test("missing description/body are treated as empty", () => {
     const tokens = buildDocumentTokens({ title: "solo" });
     expect(tokens).toEqual([{ token: "solo", weight: TOKEN_WEIGHT_TITLE }]);
+  });
+
+  test("tags carry weight 6, additive with other fields", () => {
+    const tokens = buildDocumentTokens({
+      title: "alpha",
+      tags: ["alpha", "delta"],
+      body: "delta",
+    });
+    const byToken = new Map(tokens.map((t) => [t.token, t.weight]));
+    expect(byToken.get("alpha")).toBe(TOKEN_WEIGHT_TITLE + TOKEN_WEIGHT_TAG);
+    expect(byToken.get("delta")).toBe(TOKEN_WEIGHT_TAG + TOKEN_WEIGHT_BODY);
+  });
+
+  test("CJK tags are bigram-tokenized without crossing tag boundaries", () => {
+    const tokens = buildDocumentTokens({ title: "t", tags: ["売上", "月次"] });
+    const set = new Set(tokens.map((t) => t.token));
+    expect(set.has("売上")).toBe(true);
+    expect(set.has("月次")).toBe(true);
+    // タグ跨ぎのバイグラム（"上月"）は生まれない
+    expect(set.has("上月")).toBe(false);
   });
 
   test("caps at MAX_TOKENS_PER_DOCUMENT keeping high-weight tokens", () => {

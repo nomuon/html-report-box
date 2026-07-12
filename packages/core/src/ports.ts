@@ -92,12 +92,14 @@ export interface Page<T> {
   nextCursor?: string;
 }
 
-/** Options for the public published list: sort order + kind filter. */
+/** Options for the public published list: sort order + kind / tag filters. */
 export interface PublishedListOptions extends PageOptions {
   /** updatedAt sort order (default "desc" = newest first). */
   order?: ListOrder;
   /** Restrict results to one report kind. */
   kind?: ReportKind;
+  /** Restrict results to reports carrying this exact tag. */
+  tag?: string;
 }
 
 // ---- Repository ----

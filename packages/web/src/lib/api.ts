@@ -132,10 +132,16 @@ export class ApiClient {
   }
 
   listReports(
-    opts: { order?: ListOrder; kind?: ReportKind; limit?: number; cursor?: string } = {},
+    opts: { order?: ListOrder; kind?: ReportKind; tag?: string; limit?: number; cursor?: string } = {},
   ): Promise<ListReportsResponse> {
     return this.request("GET", "/reports", {
-      query: { order: opts.order, kind: opts.kind, limit: opts.limit, cursor: opts.cursor },
+      query: {
+        order: opts.order,
+        kind: opts.kind,
+        tag: opts.tag,
+        limit: opts.limit,
+        cursor: opts.cursor,
+      },
     });
   }
 

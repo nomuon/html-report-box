@@ -236,6 +236,75 @@ test("GET /reports supports order=asc and a kind filter", async () => {
 });
 
 // =====================
+// Tags — create / PATCH / list filter
+// =====================
+
+test("tags: create persists them, GET /reports?tag= filters, PATCH replaces + reindexes", async () => {
+  const env = makeEnv();
+  const created = await call(env.app, "POST", "/reports", {
+    user: "alice",
+    body: { title: "タグ付き", kind: "html", tags: [" 月次 ", "月次", "", "営業"] },
+  });
+  expect(created.status).toBe(201);
+  expect(created.json.report.tags).toEqual(["月次", "営業"]); // 正規化済み
+  const id: string = created.json.report.id;
+  await env.ctx.storage.putStagingObject(
+    created.json.upload.key,
+    new TextEncoder().encode("<html><body>tag body</body></html>"),
+  );
+  await call(env.app, "POST", `/reports/${id}/complete`, {
+    user: "alice",
+    body: { key: created.json.upload.key },
+  });
+  await call(env.app, "POST", `/reports/${id}/publish`, { user: "alice" });
+  const { id: other } = await uploadPublished(env, "alice", "タグなし");
+
+  // 単一タグの完全一致絞り込み
+  const filtered = await call(env.app, "GET", `/reports?tag=${encodeURIComponent("月次")}`);
+  expect(filtered.status).toBe(200);
+  expect(filtered.json.reports.map((r: any) => r.id)).toEqual([id]);
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(2);
+  expect(other).not.toBe(id);
+
+  // タグは公開ビューに含まれ、検索でもヒットする（重み6）
+  const hit = await call(env.app, "GET", `/search?q=${encodeURIComponent("営業")}`);
+  expect(hit.json.results.map((r: any) => r.report.id)).toEqual([id]);
+  expect(hit.json.results[0].score).toBe(6);
+
+  // PATCH で置換（省略時は変更なし・[] で全削除）
+  const patched = await call(env.app, "PATCH", `/reports/${id}`, {
+    user: "alice",
+    body: { tags: ["再編"] },
+  });
+  expect(patched.status).toBe(200);
+  expect(patched.json.report.tags).toEqual(["再編"]);
+  expect((await call(env.app, "GET", `/reports?tag=${encodeURIComponent("月次")}`)).json.reports).toHaveLength(0);
+  expect((await call(env.app, "GET", `/reports?tag=${encodeURIComponent("再編")}`)).json.reports).toHaveLength(1);
+
+  const titleOnly = await call(env.app, "PATCH", `/reports/${id}`, {
+    user: "alice",
+    body: { title: "改題" },
+  });
+  expect(titleOnly.json.report.tags).toEqual(["再編"]);
+
+  // バリデーション: 11個 / 31文字 / 空タグクエリは 400
+  const tooMany = await call(env.app, "PATCH", `/reports/${id}`, {
+    user: "alice",
+    body: { tags: Array.from({ length: 11 }, (_, i) => `t${i}`) },
+  });
+  expect(tooMany.status).toBe(400);
+  expect(tooMany.json.error.code).toBe("validation_failed");
+  const tooLong = await call(env.app, "POST", "/reports", {
+    user: "alice",
+    body: { title: "t", kind: "html", tags: ["x".repeat(31)] },
+  });
+  expect(tooLong.status).toBe(400);
+  const blankTag = await call(env.app, "GET", "/reports?tag=%20%20");
+  expect(blankTag.status).toBe(400);
+  expect(blankTag.json.error.code).toBe("validation_failed");
+});
+
+// =====================
 // GET /search — cursor pagination
 // =====================
 

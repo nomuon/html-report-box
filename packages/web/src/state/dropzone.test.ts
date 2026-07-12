@@ -18,6 +18,7 @@ function report(status: OwnedReport["status"], findings: OwnedReport["findings"]
     id: "A".repeat(21),
     title: "t",
     description: "",
+    tags: [],
     ownerSub: "dev-alice",
     ownerName: "Alice",
     status,

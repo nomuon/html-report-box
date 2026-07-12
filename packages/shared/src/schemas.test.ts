@@ -21,8 +21,11 @@ import {
   OwnedReportSchema,
   PresignedUploadSchema,
   PublicReportSchema,
+  REPORT_TAG_MAX,
+  REPORT_TAGS_MAX,
   ReportIdSchema,
   ReportMetaSchema,
+  ReportTagsSchema,
   ScanVerdictSchema,
   SearchQuerySchema,
   toOwnedReport,
@@ -35,6 +38,7 @@ const validMeta: ReportMeta = {
   id: "V1StGXR8_Z5jdHi6B-myT",
   title: "月次売上レポート",
   description: "2026年6月の売上サマリ",
+  tags: ["売上", "月次"],
   ownerSub: "google_1234567890",
   ownerName: "Alice",
   status: "published",
@@ -87,6 +91,12 @@ describe("ReportMetaSchema", () => {
     for (const status of ["private", "published", "unlisted", "rejected", "takedown"]) {
       expect(ReportMetaSchema.safeParse({ ...validMeta, status }).success).toBe(true);
     }
+  });
+
+  test("tags default to [] when omitted (後方互換)", () => {
+    const { tags: _t, ...rest } = validMeta;
+    expect(ReportMetaSchema.parse(rest).tags).toEqual([]);
+    expect(ReportMetaSchema.parse(validMeta).tags).toEqual(["売上", "月次"]);
   });
 
   test("findings require ruleId/severity/message", () => {
@@ -147,6 +157,31 @@ describe("error shape", () => {
   });
 });
 
+describe("ReportTagsSchema (タグ正規化)", () => {
+  test("trims, drops empties and dedupes (first-appearance order)", () => {
+    expect(ReportTagsSchema.parse([" 売上 ", "", "  ", "月次", "売上"])).toEqual(["売上", "月次"]);
+  });
+
+  test("boundaries: 30 chars ok / 31 rejected; 10 tags ok / 11 rejected", () => {
+    expect(ReportTagsSchema.parse(["x".repeat(REPORT_TAG_MAX)])).toEqual([
+      "x".repeat(REPORT_TAG_MAX),
+    ]);
+    expect(ReportTagsSchema.safeParse(["x".repeat(REPORT_TAG_MAX + 1)]).success).toBe(false);
+
+    const ten = Array.from({ length: REPORT_TAGS_MAX }, (_, i) => `t${i}`);
+    expect(ReportTagsSchema.parse(ten)).toEqual(ten);
+    expect(ReportTagsSchema.safeParse([...ten, "over"]).success).toBe(false);
+    // 上限判定は正規化（重複除去）後に行われる
+    expect(ReportTagsSchema.parse([...ten, "t0"])).toEqual(ten);
+  });
+
+  test("trim 前が31文字でも trim 後30文字以内なら通る", () => {
+    expect(ReportTagsSchema.parse([` ${"x".repeat(REPORT_TAG_MAX)}`])).toEqual([
+      "x".repeat(REPORT_TAG_MAX),
+    ]);
+  });
+});
+
 describe("API request schemas", () => {
   test("CreateReportRequest: title required, description defaults", () => {
     const parsed = CreateReportRequestSchema.parse({ title: "T", kind: "html" });
@@ -166,6 +201,28 @@ describe("API request schemas", () => {
     expect(UpdateReportRequestSchema.safeParse({}).success).toBe(false);
     expect(UpdateReportRequestSchema.safeParse({ title: "new" }).success).toBe(true);
     expect(UpdateReportRequestSchema.safeParse({ description: "" }).success).toBe(true);
+  });
+
+  test("CreateReportRequest: tags default to [] and are normalized", () => {
+    expect(CreateReportRequestSchema.parse({ title: "T", kind: "html" }).tags).toEqual([]);
+    expect(
+      CreateReportRequestSchema.parse({ title: "T", kind: "html", tags: [" a ", "a", ""] }).tags,
+    ).toEqual(["a"]);
+  });
+
+  test("UpdateReportRequest accepts a tags-only patch ([] = 全削除)", () => {
+    expect(UpdateReportRequestSchema.parse({ tags: ["再編", "再編"] }).tags).toEqual(["再編"]);
+    expect(UpdateReportRequestSchema.parse({ tags: [] }).tags).toEqual([]);
+    expect(UpdateReportRequestSchema.parse({ title: "t" }).tags).toBeUndefined();
+  });
+
+  test("ListReportsQuery accepts tag and rejects blank / over-long values", () => {
+    expect(ListReportsQuerySchema.parse({ tag: " 月次 " }).tag).toBe("月次");
+    expect(ListReportsQuerySchema.parse({}).tag).toBeUndefined();
+    expect(ListReportsQuerySchema.safeParse({ tag: "  " }).success).toBe(false);
+    expect(ListReportsQuerySchema.safeParse({ tag: "x".repeat(REPORT_TAG_MAX + 1) }).success).toBe(
+      false,
+    );
   });
 
   test("SearchQuery: q required, trimmed, limit coerced from string", () => {

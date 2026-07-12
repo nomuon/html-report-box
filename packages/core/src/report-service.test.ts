@@ -54,7 +54,7 @@ afterEach(() => {
 /** create → staged PUT → complete（新モデルでは private で終わる） */
 async function upload(
   user: ReturnType<typeof getDevUser>,
-  input: { title: string; description?: string },
+  input: { title: string; description?: string; tags?: string[] },
   content: string,
 ) {
   const { report, upload } = await ctx.service.create(user, { ...input, kind: "html" });
@@ -65,7 +65,7 @@ async function upload(
 /** upload + オーナーによる publish まで通す */
 async function uploadPublished(
   user: ReturnType<typeof getDevUser>,
-  input: { title: string; description?: string },
+  input: { title: string; description?: string; tags?: string[] },
   content: string,
 ) {
   const { report } = await upload(user, input, content);
@@ -541,6 +541,79 @@ describe("metadata update & reindex", () => {
     expect(hits).toHaveLength(1);
     // body tokens survive a metadata-only update
     expect((await ctx.service.search("共通本文キーワード")).results).toHaveLength(1);
+  });
+});
+
+describe("tags", () => {
+  test("create persists normalized tags; they are searchable with weight 6 once published", async () => {
+    const { report } = await uploadPublished(
+      alice,
+      { title: "タグ付きレポート", tags: [" kpi ", "kpi", "", "売上分析"] },
+      html("t", "<p>本文には無い語で探す。</p>"),
+    );
+    expect(report.tags).toEqual(["kpi", "売上分析"]);
+
+    // タグにしか無い語でヒットし、score はタグの重み 6
+    const { results } = await ctx.service.search("kpi");
+    expect(results).toHaveLength(1);
+    expect(results[0]!.report.id).toBe(report.id);
+    expect(results[0]!.score).toBe(6);
+    expect(results[0]!.report.tags).toEqual(["kpi", "売上分析"]);
+  });
+
+  test("title match (8) outranks tag match (6)", async () => {
+    const inTitle = await uploadPublished(alice, { title: "kpi ダッシュボード" }, html("a", "本文A"));
+    const inTag = await uploadPublished(bob, { title: "別件", tags: ["kpi"] }, html("b", "本文B"));
+
+    const { results } = await ctx.service.search("kpi");
+    expect(results.map((r) => r.report.id)).toEqual([inTitle.report.id, inTag.report.id]);
+    expect(results[0]!.score).toBeGreaterThan(results[1]!.score);
+  });
+
+  test("update replaces tags and reindexes: old tag stops matching, new tag hits", async () => {
+    // 語彙が重ならないタグを使う（CJK バイグラムの部分一致を避ける）
+    const { report } = await uploadPublished(
+      alice,
+      { title: "タグ更新対象", tags: ["りんご"] },
+      html("t", "本文"),
+    );
+    expect((await ctx.service.search("りんご")).results).toHaveLength(1);
+
+    const updated = await ctx.service.update(alice, report.id, { tags: ["みかん"] });
+    expect(updated.tags).toEqual(["みかん"]);
+    expect((await ctx.service.search("りんご")).results).toHaveLength(0);
+    expect((await ctx.service.search("みかん")).results).toHaveLength(1);
+
+    // [] で全削除もできる（タイトルでのヒットは残る）
+    await ctx.service.update(alice, report.id, { tags: [] });
+    expect((await ctx.service.search("みかん")).results).toHaveLength(0);
+    expect((await ctx.service.search("タグ更新対象")).results).toHaveLength(1);
+  });
+
+  test("listPublished filters by a single exact tag", async () => {
+    const { report: a } = await uploadPublished(alice, { title: "A", tags: ["月次", "営業"] }, html("a", "x"));
+    await uploadPublished(alice, { title: "B", tags: ["週次"] }, html("b", "y"));
+    await uploadPublished(bob, { title: "C" }, html("c", "z"));
+
+    const filtered = await ctx.service.listPublished({ tag: "月次" });
+    expect(filtered.items.map((m) => m.id)).toEqual([a.id]);
+    // 部分一致では絞り込まれない（完全一致のみ）
+    expect((await ctx.service.listPublished({ tag: "月" })).items).toHaveLength(0);
+    expect((await ctx.service.listPublished()).items).toHaveLength(3);
+  });
+
+  test("invalid tags are rejected at create/update", async () => {
+    await expectDomainError(
+      ctx.service.create(alice, { title: "t", kind: "html", tags: ["x".repeat(31)] }),
+      "validation_failed",
+    );
+    const { report } = await upload(alice, { title: "上限" }, html("t", "b"));
+    await expectDomainError(
+      ctx.service.update(alice, report.id, {
+        tags: Array.from({ length: 11 }, (_, i) => `t${i}`),
+      }),
+      "validation_failed",
+    );
   });
 });
 
