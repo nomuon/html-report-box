@@ -235,6 +235,50 @@ describe("API response schemas", () => {
     });
     expect(ok.success).toBe(true);
   });
+
+  test("PresignedUpload: method/fields/headers default (S3 POST back-compat)", () => {
+    // 既存の presigned POST 呼び出しは method/headers を省略できる。
+    const parsed = PresignedUploadSchema.parse({
+      url: "https://staging.s3.amazonaws.com",
+      fields: { key: "staging/x", policy: "..." },
+      key: "staging/x",
+      expiresInSeconds: 300,
+      maxSizeBytes: MAX_HTML_SIZE_BYTES,
+    });
+    expect(parsed.method).toBe("post");
+    expect(parsed.headers).toEqual({});
+
+    // fields も省略可能（default {}）。
+    const noFields = PresignedUploadSchema.parse({
+      url: "https://r2.example/put",
+      key: "staging/x",
+      expiresInSeconds: 300,
+      maxSizeBytes: MAX_HTML_SIZE_BYTES,
+    });
+    expect(noFields.fields).toEqual({});
+  });
+
+  test("PresignedUpload: put + headers parse (R2 transport)", () => {
+    const parsed = PresignedUploadSchema.parse({
+      method: "put",
+      url: "https://r2.example/staging/x?sig=abc",
+      headers: { "content-type": "text/html" },
+      key: "staging/x",
+      expiresInSeconds: 300,
+      maxSizeBytes: MAX_HTML_SIZE_BYTES,
+    });
+    expect(parsed.method).toBe("put");
+    expect(parsed.headers).toEqual({ "content-type": "text/html" });
+    expect(parsed.fields).toEqual({});
+    // method は post/put のみ。
+    expect(PresignedUploadSchema.safeParse({
+      method: "patch",
+      url: "https://x",
+      key: "staging/x",
+      expiresInSeconds: 300,
+      maxSizeBytes: MAX_HTML_SIZE_BYTES,
+    }).success).toBe(false);
+  });
 });
 
 describe("constants", () => {

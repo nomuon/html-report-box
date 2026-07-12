@@ -119,7 +119,11 @@ export interface SearchIndex {
 // ---- Object storage ----
 
 export interface ObjectStorage {
-  /** Presigned POST against the staging area (size enforced via content-length-range). */
+  /**
+   * Presigned upload against the staging area. Returns a presigned POST (S3;
+   * size enforced via content-length-range) or a presigned PUT (R2 等、POST
+   * 非対応)。返却形は PresignedUpload.method で判別する。
+   */
   createPresignedUpload(opts: {
     key: string;
     maxSizeBytes: number;

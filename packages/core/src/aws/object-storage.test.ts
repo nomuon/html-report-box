@@ -35,8 +35,10 @@ describe("presigned POST", () => {
     expect(params.Conditions).toContainEqual(["content-length-range", 1, 5 * 1024 * 1024]);
 
     expect(upload).toEqual({
+      method: "post",
       url: `https://${STAGING}.s3.example/`,
       fields: { key: "staging/r1/u1", policy: "p" },
+      headers: {},
       key: "staging/r1/u1",
       expiresInSeconds: 600,
       maxSizeBytes: 5 * 1024 * 1024,

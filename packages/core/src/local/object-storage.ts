@@ -38,8 +38,10 @@ export class LocalObjectStorage implements ObjectStorage {
     expiresInSeconds?: number;
   }): Promise<PresignedUpload> {
     return {
+      method: "post",
       url: this.uploadEndpoint,
       fields: { key: opts.key },
+      headers: {},
       key: opts.key,
       expiresInSeconds: opts.expiresInSeconds ?? 900,
       maxSizeBytes: opts.maxSizeBytes,

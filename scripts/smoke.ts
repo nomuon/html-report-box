@@ -51,7 +51,13 @@ async function uploadFlow(opts: {
 }) {
   const headers = opts.headers ?? alice;
   let id: string;
-  let upload: { url: string; fields: Record<string, string> };
+  let upload: {
+    url: string;
+    method?: "post" | "put";
+    key?: string;
+    fields?: Record<string, string>;
+    headers?: Record<string, string>;
+  };
   if (opts.overwriteId) {
     id = opts.overwriteId;
     const res = await fetch(`${BASE}/api/reports/${id}/upload-url`, {
@@ -75,18 +81,31 @@ async function uploadFlow(opts: {
     id = body.report.id;
     upload = body.upload;
   }
-  const form = new FormData();
-  for (const [k, v] of Object.entries(upload.fields)) form.set(k, v);
   const bytes = typeof opts.data === "string" ? new TextEncoder().encode(opts.data) : opts.data;
   const mime = opts.kind === "zip" ? "application/zip" : "text/html";
-  form.set("file", new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime }), opts.filename ?? `report.${opts.kind}`);
   // upload.url is origin-relative in local mode ("/local-upload").
-  const upRes = await fetch(new URL(upload.url, BASE), { method: "POST", body: form });
+  let upRes: Response;
+  let stagingKey: string;
+  if (upload.method === "put") {
+    // R2 等: presigned PUT に生バイトを送り、付随ヘッダーを適用する。
+    stagingKey = upload.key ?? "";
+    upRes = await fetch(new URL(upload.url, BASE), {
+      method: "PUT",
+      headers: { "content-type": mime, ...(upload.headers ?? {}) },
+      body: bytes as Uint8Array<ArrayBuffer>,
+    });
+  } else {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(upload.fields ?? {})) form.set(k, v);
+    form.set("file", new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime }), opts.filename ?? `report.${opts.kind}`);
+    stagingKey = upload.fields?.key ?? "";
+    upRes = await fetch(new URL(upload.url, BASE), { method: "POST", body: form });
+  }
   if (upRes.status !== 204) return { step: "upload", status: upRes.status, id } as const;
   const compRes = await fetch(`${BASE}/api/reports/${id}/complete`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ key: upload.fields.key }),
+    body: JSON.stringify({ key: stagingKey }),
   });
   return { step: "complete", status: compRes.status, id, body: await json(compRes) } as const;
 }

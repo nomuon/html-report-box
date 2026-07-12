@@ -58,19 +58,31 @@ export const PaginationQuerySchema = z.object({
 });
 export type PaginationQuery = z.infer<typeof PaginationQuerySchema>;
 
-/** Presigned POST issued against the staging bucket. */
+/**
+ * Presigned upload issued against the staging bucket. Two transports:
+ * - method "post": S3 presigned POST — send a multipart form of `fields` + file
+ *   (size enforced via the content-length-range policy condition).
+ * - method "put":  presigned PUT (R2 等、POST 非対応) — PUT the raw bytes with
+ *   `headers` applied.
+ * `method` defaults to "post" so existing S3 issuers/consumers stay unchanged.
+ */
 export const PresignedUploadSchema = z.object({
-  /** URL to POST the multipart form to. */
+  /** Upload transport: presigned POST (S3) or presigned PUT (R2 等). */
+  method: z.enum(["post", "put"]).default("post"),
+  /** URL to POST the multipart form / PUT the bytes to. */
   url: z.string().min(1),
-  /** Form fields that must accompany the file (policy, signature, key, ...). */
-  fields: z.record(z.string(), z.string()),
+  /** POST only: form fields that must accompany the file (policy, signature, key, ...). */
+  fields: z.record(z.string(), z.string()).default({}),
+  /** PUT only: request headers to apply to the raw-body upload (content-type 等). */
+  headers: z.record(z.string(), z.string()).default({}),
   /** Staging object key the client will upload to. */
   key: z.string().min(1),
   expiresInSeconds: z.number().int().positive(),
-  /** Enforced via content-length-range in the POST policy. */
+  /** Enforced via content-length-range (POST policy) or a size check on complete. */
   maxSizeBytes: z.number().int().positive(),
 });
 export type PresignedUpload = z.infer<typeof PresignedUploadSchema>;
+export type PresignedUploadInput = z.input<typeof PresignedUploadSchema>;
 
 // =====================
 // GET /config (public)

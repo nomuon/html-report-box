@@ -105,8 +105,10 @@ export class S3ObjectStorage implements ObjectStorage {
       Expires: expiresInSeconds,
     });
     return {
+      method: "post",
       url,
       fields,
+      headers: {},
       key: opts.key,
       expiresInSeconds,
       maxSizeBytes: opts.maxSizeBytes,
