@@ -70,6 +70,21 @@ describe("ApiClient", () => {
     expect(calls[0]?.url).toBe(`/api/reports/${encodeURIComponent("abc/../x")}`);
   });
 
+  test("admin list endpoints serialize status/limit/cursor query params", async () => {
+    const { calls, fetchFn } = mockFetch(200, { reports: [], items: [], users: [] });
+    const client = new ApiClient({ fetchFn });
+    await client.adminListReports({ status: "published", limit: 50, cursor: "50" });
+    expect(calls[0]?.url).toBe("/api/admin/reports?status=published&limit=50&cursor=50");
+    await client.adminListReports();
+    expect(calls[1]?.url).toBe("/api/admin/reports");
+    await client.adminListFlagged({ limit: 50, cursor: "50" });
+    expect(calls[2]?.url).toBe("/api/admin/flagged?limit=50&cursor=50");
+    await client.adminListFlagged();
+    expect(calls[3]?.url).toBe("/api/admin/flagged");
+    await client.adminListUsers({ limit: 50, cursor: "abc" });
+    expect(calls[4]?.url).toBe("/api/admin/users?limit=50&cursor=abc");
+  });
+
   test("admin setAdmin uses PUT to grant / DELETE to revoke", async () => {
     const { calls, fetchFn } = mockFetch(200, { ok: true });
     const client = new ApiClient({ fetchFn });

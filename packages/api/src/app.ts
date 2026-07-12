@@ -336,8 +336,12 @@ export function createApp(ctx: AppContext): AppType {
   });
 
   app.get("/admin/flagged", async (c) => {
-    const items = await ctx.service.adminListFlagged(mustUser(c));
-    return c.json({ items });
+    const query = parseWith(PaginationQuerySchema, c.req.query(), "query");
+    const page = await ctx.service.adminListFlagged(mustUser(c), pageOptions(query));
+    return c.json({
+      items: page.items,
+      ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}),
+    });
   });
 
   app.get("/admin/reports/:id/flags", async (c) => {

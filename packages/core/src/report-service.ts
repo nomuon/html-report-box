@@ -449,7 +449,8 @@ export class ReportService {
   /** 通報一覧: reports that received abuse flags, newest flag first. */
   async adminListFlagged(
     user: AuthUser,
-  ): Promise<Array<{ report: ReportMeta; flags: ReportFlag[] }>> {
+    opts?: PageOptions,
+  ): Promise<Page<{ report: ReportMeta; flags: ReportFlag[] }>> {
     this.assertAdmin(user);
     const flagged = await this.repo.listFlagged();
     const metas = await this.repo.getMany(flagged.map((f) => f.id));
@@ -460,7 +461,15 @@ export class ReportService {
     const latest = (flags: ReportFlag[]) =>
       flags.reduce((max, f) => (f.createdAt > max ? f.createdAt : max), "");
     items.sort((a, b) => latest(b.flags).localeCompare(latest(a.flags)));
-    return items;
+    // repo.listFlagged() は全件返すので、ソート後にオフセット cursor でページングする。
+    const limit = opts?.limit ?? 50;
+    const offset = opts?.cursor ? Number.parseInt(opts.cursor, 10) : 0;
+    if (Number.isNaN(offset) || offset < 0) {
+      throw new DomainError("bad_request", "invalid cursor");
+    }
+    const page = items.slice(offset, offset + limit);
+    const next = offset + limit;
+    return next < items.length ? { items: page, nextCursor: String(next) } : { items: page };
   }
 
   /** Resolve a report's flags (通報を処理済みにする). */

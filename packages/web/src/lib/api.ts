@@ -196,8 +196,12 @@ export class ApiClient {
     });
   }
 
-  adminListFlagged(): Promise<AdminListFlaggedResponse> {
-    return this.request("GET", "/admin/flagged");
+  adminListFlagged(
+    opts: { limit?: number; cursor?: string } = {},
+  ): Promise<AdminListFlaggedResponse> {
+    return this.request("GET", "/admin/flagged", {
+      query: { limit: opts.limit, cursor: opts.cursor },
+    });
   }
 
   adminListFlags(id: string): Promise<AdminListFlagsResponse> {

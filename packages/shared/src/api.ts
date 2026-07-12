@@ -365,6 +365,7 @@ export type AdminFlaggedReport = z.infer<typeof AdminFlaggedReportSchema>;
 
 export const AdminListFlaggedResponseSchema = z.object({
   items: z.array(AdminFlaggedReportSchema),
+  nextCursor: z.string().optional(),
 });
 export type AdminListFlaggedResponse = z.infer<typeof AdminListFlaggedResponseSchema>;
 

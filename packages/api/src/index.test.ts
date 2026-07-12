@@ -659,6 +659,55 @@ test("GET /admin/flagged lists flagged reports; DELETE .../flags resolves them",
   expect((await call(env.app, "GET", "/admin/flagged", { user: "admin" })).json.items).toHaveLength(0);
 });
 
+test("GET /admin/flagged paginates with limit/cursor", async () => {
+  const env = makeEnv();
+  const a = await uploadPublished(env, "alice", "Flagged A");
+  const b = await uploadPublished(env, "alice", "Flagged B");
+  await call(env.app, "POST", `/reports/${a.id}/flag`, { body: { reason: "通報A" }, ip: "10.1.1.1" });
+  await call(env.app, "POST", `/reports/${b.id}/flag`, { body: { reason: "通報B" }, ip: "10.1.1.2" });
+
+  const first = await call(env.app, "GET", "/admin/flagged?limit=1", { user: "admin" });
+  expect(first.status).toBe(200);
+  expect(first.json.items).toHaveLength(1);
+  expect(first.json.nextCursor).toBeDefined();
+
+  const second = await call(
+    env.app,
+    "GET",
+    `/admin/flagged?limit=1&cursor=${first.json.nextCursor}`,
+    { user: "admin" },
+  );
+  expect(second.status).toBe(200);
+  expect(second.json.items).toHaveLength(1);
+  expect(second.json.nextCursor).toBeUndefined();
+  // 2ページで両方のレポートが重複なく返る
+  const ids = [first.json.items[0].report.id, second.json.items[0].report.id];
+  expect(ids.sort()).toEqual([a.id, b.id].sort());
+
+  const bad = await call(env.app, "GET", "/admin/flagged?cursor=oops", { user: "admin" });
+  expect(bad.status).toBe(400);
+  expect(bad.json.error.code).toBe("bad_request");
+});
+
+test("GET /admin/reports filters by status server-side", async () => {
+  const env = makeEnv();
+  await uploadPublished(env, "alice", "公開中レポート");
+  await upload(env, "alice", "非公開レポート");
+
+  const published = await call(env.app, "GET", "/admin/reports?status=published", { user: "admin" });
+  expect(published.status).toBe(200);
+  expect(published.json.reports.map((r: any) => r.title)).toEqual(["公開中レポート"]);
+
+  const priv = await call(env.app, "GET", "/admin/reports?status=private", { user: "admin" });
+  expect(priv.json.reports.map((r: any) => r.title)).toEqual(["非公開レポート"]);
+
+  const all = await call(env.app, "GET", "/admin/reports", { user: "admin" });
+  expect(all.json.reports).toHaveLength(2);
+
+  const invalid = await call(env.app, "GET", "/admin/reports?status=nope", { user: "admin" });
+  expect(invalid.status).toBe(400);
+});
+
 // =====================
 // Admin users
 // =====================

@@ -445,16 +445,47 @@ describe("flags (通報)", () => {
 
     // 通報一覧（管理画面のキュー）
     const flagged = await ctx.service.adminListFlagged(admin);
-    expect(flagged).toHaveLength(1);
-    expect(flagged[0]!.report.id).toBe(report.id);
-    expect(flagged[0]!.flags).toHaveLength(2);
+    expect(flagged.items).toHaveLength(1);
+    expect(flagged.items[0]!.report.id).toBe(report.id);
+    expect(flagged.items[0]!.flags).toHaveLength(2);
+    expect(flagged.nextCursor).toBeUndefined();
     await expectDomainError(ctx.service.adminListFlagged(alice), "forbidden");
 
     // 解決すると一覧から消える
     await ctx.service.adminClearFlags(admin, report.id);
-    expect(await ctx.service.adminListFlagged(admin)).toHaveLength(0);
+    expect((await ctx.service.adminListFlagged(admin)).items).toHaveLength(0);
     expect(await ctx.service.adminListFlags(admin, report.id)).toHaveLength(0);
     await expectDomainError(ctx.service.adminClearFlags(alice, report.id), "forbidden");
+  });
+
+  test("adminListFlagged paginates with a cursor (newest flag first)", async () => {
+    // 通報時刻の同着で並びが揺れないよう、1秒ずつ進む固定クロックを使う
+    let tick = 0;
+    ctx = createLocalContext({
+      dataDir,
+      scanner: markerScanner,
+      now: () => new Date(Date.UTC(2026, 6, 12, 0, 0, tick++)),
+    });
+    const { report: older } = await uploadPublished(alice, { title: "先に通報" }, html("a", "b"));
+    const { report: newer } = await uploadPublished(alice, { title: "後に通報" }, html("a", "b"));
+    await ctx.service.flag(older.id, "古い通報");
+    await ctx.service.flag(newer.id, "新しい通報");
+
+    const first = await ctx.service.adminListFlagged(admin, { limit: 1 });
+    expect(first.items.map((i) => i.report.id)).toEqual([newer.id]);
+    expect(first.nextCursor).toBeDefined();
+
+    const second = await ctx.service.adminListFlagged(admin, {
+      limit: 1,
+      cursor: first.nextCursor!,
+    });
+    expect(second.items.map((i) => i.report.id)).toEqual([older.id]);
+    expect(second.nextCursor).toBeUndefined();
+
+    await expectDomainError(
+      ctx.service.adminListFlagged(admin, { cursor: "not-a-number" }),
+      "bad_request",
+    );
   });
 
   test("unpublished reports cannot be flagged", async () => {
