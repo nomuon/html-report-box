@@ -91,13 +91,8 @@ export function ReportDetailPage() {
     retry: (count, err) => !(isApiError(err) && err.status === 404) && count < 2,
   });
 
-  // オーナー判定: 自分のレポート一覧に含まれるか（PublicReport は ownerSub を持たない）
-  const mine = useQuery({
-    queryKey: ["my-reports", "first-page"],
-    queryFn: () => api.myReports({ limit: 100 }),
-    enabled: session !== null,
-  });
-  const isOwner = mine.data?.reports.some((r) => r.id === id) ?? false;
+  // オーナー判定: API が viewer 文脈で返す isOwner を使う
+  const isOwner = query.data?.isOwner ?? false;
   const canEdit = isOwner || (session?.isAdmin ?? false);
 
   const report = query.data?.report;

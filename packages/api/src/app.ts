@@ -223,9 +223,10 @@ export function createApp(ctx: AppContext): AppType {
   });
 
   app.get("/reports/:id", async (c) => {
-    const { report, url } = await ctx.service.get(c.req.param("id"), c.get("user"));
+    const { report, url, isOwner } = await ctx.service.get(c.req.param("id"), c.get("user"));
     return c.json({
       report: toPublicReport(report),
+      isOwner,
       ...(url !== undefined ? { url } : {}),
     });
   });

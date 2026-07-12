@@ -192,6 +192,8 @@ export type SearchResponse = z.infer<typeof SearchResponseSchema>;
 // =====================
 export const GetReportResponseSchema = z.object({
   report: PublicReportSchema,
+  /** True when the requesting viewer owns this report (false for anonymous / others / admin). */
+  isOwner: z.boolean(),
   /** Content URL, e.g. https://content.example.com/r/<id>/ (absent unless published). */
   url: z.string().optional(),
 });

@@ -290,6 +290,29 @@ test("non-published report: owner and admin see it, others get 404", async () =>
   expect(mine.json.reports.map((r: any) => r.id)).toContain(id);
 });
 
+test("GET /reports/:id returns isOwner from the viewer context", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Ownership");
+
+  // published: everyone can read, but only the owner gets isOwner=true
+  const owner = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(owner.status).toBe(200);
+  expect(owner.json.isOwner).toBe(true);
+  const other = await call(env.app, "GET", `/reports/${id}`, { user: "bob" });
+  expect(other.json.isOwner).toBe(false);
+  const admin = await call(env.app, "GET", `/reports/${id}`, { user: "admin" });
+  expect(admin.json.isOwner).toBe(false);
+  const unauth = await call(env.app, "GET", `/reports/${id}`);
+  expect(unauth.json.isOwner).toBe(false);
+
+  // private: owner keeps isOwner=true, admin sees it with isOwner=false
+  await call(env.app, "POST", `/reports/${id}/unpublish`, { user: "alice" });
+  const privOwner = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(privOwner.json.isOwner).toBe(true);
+  const privAdmin = await call(env.app, "GET", `/reports/${id}`, { user: "admin" });
+  expect(privAdmin.json.isOwner).toBe(false);
+});
+
 test("complete with an unknown key → 400", async () => {
   const env = makeEnv();
   const created = await call(env.app, "POST", "/reports", {

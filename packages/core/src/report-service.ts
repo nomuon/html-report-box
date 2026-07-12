@@ -119,17 +119,19 @@ export class ReportService {
    * Visibility: published → anyone; otherwise owner or admin only
    * (non-visible reports surface as not_found, never as forbidden).
    */
-  async get(id: string, viewer?: AuthUser | null): Promise<{ report: ReportMeta; url?: string }> {
+  async get(
+    id: string,
+    viewer?: AuthUser | null,
+  ): Promise<{ report: ReportMeta; url?: string; isOwner: boolean }> {
     const meta = await this.repo.get(id);
     if (!meta) throw new DomainError("not_found", "report not found");
-    const visible =
-      meta.status === "published" ||
-      (viewer != null && (viewer.isAdmin || viewer.sub === meta.ownerSub));
+    const isOwner = viewer != null && viewer.sub === meta.ownerSub;
+    const visible = meta.status === "published" || isOwner || (viewer?.isAdmin ?? false);
     if (!visible) throw new DomainError("not_found", "report not found");
     if (meta.status === "published") {
-      return { report: meta, url: this.contentUrl(id) };
+      return { report: meta, url: this.contentUrl(id), isOwner };
     }
-    return { report: meta };
+    return { report: meta, isOwner };
   }
 
   async search(query: string, limit = 20): Promise<SearchResult[]> {
