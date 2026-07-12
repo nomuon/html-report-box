@@ -98,7 +98,9 @@ describe("handleLocalUpload", () => {
   });
 });
 
-describe("MCP API キー（server.ts と同じ配線を検証）", () => {
+// 認証本体は createMcpApp 内（@hrb/mcp のテストが担保）。ここでは 401/200 が
+// handleMcp を素通しで伝わることを静的キー middleware で検証する。
+describe("MCP API キー（handleMcp が認証結果を素通しすること）", () => {
   test("キー設定時は Bearer なし 401 / 一致で 200", async () => {
     const { Hono } = await import("hono");
     const { bearerApiKeyAuth } = await import("@hrb/mcp");

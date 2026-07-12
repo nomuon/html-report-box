@@ -363,6 +363,50 @@ export const FlagReportResponseSchema = OkResponseSchema;
 export type FlagReportResponse = z.infer<typeof FlagReportResponseSchema>;
 
 // =====================
+// API keys (/me/api-keys) — MCP 等のプログラマティックアクセス用 per-user キー
+// =====================
+export const API_KEY_NAME_MAX = 100;
+/** ユーザーあたりの発行上限。超過は conflict。 */
+export const MAX_API_KEYS_PER_USER = 10;
+
+export const ApiKeyNameSchema = z.string().trim().min(1).max(API_KEY_NAME_MAX);
+
+/** キーのメタデータ。平文は発行レスポンスで一度だけ返り、以後は取得できない。 */
+export const ApiKeySchema = z.object({
+  keyId: z.string().min(1),
+  name: ApiKeyNameSchema,
+  /** 平文キーの先頭数文字（一覧での識別用、e.g. "hrb_a1b2c3d4"）。 */
+  prefix: z.string().min(1),
+  createdAt: z.iso.datetime(),
+  /** verify で解決されるたびにベストエフォートで更新。 */
+  lastUsedAt: z.iso.datetime().optional(),
+});
+export type ApiKey = z.infer<typeof ApiKeySchema>;
+
+// GET /me/api-keys — 一覧（平文は含まない）
+export const ListApiKeysResponseSchema = z.object({
+  keys: z.array(ApiKeySchema),
+});
+export type ListApiKeysResponse = z.infer<typeof ListApiKeysResponseSchema>;
+
+// POST /me/api-keys — 発行（201。plaintext はこのレスポンス限り）
+export const CreateApiKeyRequestSchema = z.object({
+  name: ApiKeyNameSchema,
+});
+export type CreateApiKeyRequest = z.infer<typeof CreateApiKeyRequestSchema>;
+
+export const CreateApiKeyResponseSchema = z.object({
+  key: ApiKeySchema,
+  /** 平文キー（"hrb_" プレフィクス）。二度と取得できない。 */
+  plaintext: z.string().min(1),
+});
+export type CreateApiKeyResponse = z.infer<typeof CreateApiKeyResponseSchema>;
+
+// DELETE /me/api-keys/:keyId — 失効
+export const DeleteApiKeyResponseSchema = OkResponseSchema;
+export type DeleteApiKeyResponse = z.infer<typeof DeleteApiKeyResponseSchema>;
+
+// =====================
 // Admin
 // =====================
 

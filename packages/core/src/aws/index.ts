@@ -26,6 +26,14 @@ export {
 } from "./repository.ts";
 export { DynamoSearchIndex, type DynamoSearchIndexOptions } from "./search-index.ts";
 export {
+  DynamoApiKeyStore,
+  type DynamoApiKeyStoreOptions,
+  apiKeyHashPk,
+  apiKeyOwnerPk,
+  APIKEY_SK,
+  APIKEY_OWNER_SK_PREFIX,
+} from "./api-keys.ts";
+export {
   S3ObjectStorage,
   type S3ObjectStorageOptions,
   type PresignPostFn,

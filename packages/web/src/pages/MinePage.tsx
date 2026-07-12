@@ -5,6 +5,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import type { OwnedReport } from "@hrb/shared";
 import { scanFindingSummary } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
+import { ApiKeysSection } from "../components/ApiKeysSection.tsx";
 import { Button } from "../components/Button.tsx";
 import { StatusChip } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
@@ -172,6 +173,9 @@ export function MinePage() {
           </Button>
         </div>
       )}
+
+      <ApiKeysSection />
+
 
       {modal?.type === "edit-html" && (
         <EditHtmlModal

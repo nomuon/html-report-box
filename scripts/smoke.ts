@@ -606,7 +606,23 @@ const warnId = warnUp.id ?? "";
 
   const list = await mcpCall("tools/list", {});
   const names = ((list.result?.tools ?? []) as any[]).map((t) => t.name).sort();
-  check("MCP tools/list", names.join(",") === "get_report,list_recent_reports,search_reports", `tools=${names.join(",")}`);
+  check(
+    "MCP tools/list",
+    names.join(",") ===
+      "get_report,list_recent_reports,publish_report,search_reports,unpublish_report,upload_report",
+    `tools=${names.join(",")}`,
+  );
+
+  // 書き込みツールは per-user API キーなし（dev キーレス）では拒否される
+  const anonUpload = await mcpCall("tools/call", {
+    name: "upload_report",
+    arguments: { title: "smoke", html: "<html><body>x</body></html>" },
+  });
+  check(
+    "MCP upload_report without per-user key → isError",
+    anonUpload.result?.isError === true,
+    `isError=${anonUpload.result?.isError}`,
+  );
 
   const search = toolJson(await mcpCall("tools/call", { name: "search_reports", arguments: { query: `newtok${RUN}` } }));
   const hit = ((search.results ?? []) as any[]).find((r) => r.id === htmlId);

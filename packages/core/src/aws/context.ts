@@ -30,6 +30,7 @@ import type {
   SecurityScanner,
   ZipExtractor,
 } from "../ports.ts";
+import { DynamoApiKeyStore } from "./api-keys.ts";
 import { CognitoAuthVerifier, regionFromUserPoolId } from "./auth.ts";
 import type { JwtVerifierLike } from "./auth.ts";
 import { CloudFrontInvalidator } from "./cdn.ts";
@@ -103,6 +104,7 @@ export interface AwsContext {
   userAdmin: CognitoUserAdmin;
   domainReputation: DomainReputation;
   scanner: SecurityScanner;
+  apiKeys: DynamoApiKeyStore;
   service: ReportService;
   /** Convenience passthroughs matching @hrb/api's AppContext. */
   contentBaseUrl: string;
@@ -184,6 +186,13 @@ export function createAwsContext(env: AwsEnv, options: AwsContextOptions = {}): 
 
   const scanner = options.scanner ?? new UnconfiguredScanner();
 
+  const apiKeys = new DynamoApiKeyStore({
+    client: dynamo,
+    tableName: reportsTable,
+    ...(options.now ? { now: options.now } : {}),
+    ...(options.newId ? { newId: options.newId } : {}),
+  });
+
   const service = new ReportService({
     repo,
     search: searchIndex,
@@ -211,6 +220,7 @@ export function createAwsContext(env: AwsEnv, options: AwsContextOptions = {}): 
     userAdmin,
     domainReputation,
     scanner,
+    apiKeys,
     service,
     contentBaseUrl,
     ...(options.dailyUploadLimit !== undefined

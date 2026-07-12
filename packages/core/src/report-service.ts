@@ -231,6 +231,52 @@ export class ReportService {
     return { report: meta, upload };
   }
 
+  /**
+   * One-shot HTML upload without the presigned/staging round-trip (MCP の
+   * upload_report 用): create META + ingest the bytes directly. The full scan
+   * pipeline runs exactly like a normal complete — block → rejected, pass /
+   * warn → private. Counts against the daily upload quota.
+   */
+  async createFromHtml(
+    user: AuthUser,
+    input: { title: string; description?: string; html: string },
+    audit?: AuditInfo,
+  ): Promise<{ report: ReportMeta; url?: string }> {
+    const request: CreateReportRequest = parseOrThrow(
+      CreateReportRequestSchema,
+      { title: input.title, description: input.description, kind: "html" },
+      "report",
+    );
+    const data = new TextEncoder().encode(input.html);
+    if (data.byteLength === 0) {
+      throw new DomainError("validation_failed", "html must not be empty");
+    }
+    if (data.byteLength > MAX_HTML_SIZE_BYTES) {
+      throw new DomainError("payload_too_large", `content exceeds ${MAX_HTML_SIZE_BYTES} bytes`);
+    }
+    await this.consumeUploadQuota(user);
+
+    const id = this.newId();
+    const nowIso = this.now().toISOString();
+    const meta: ReportMeta = {
+      id,
+      title: request.title,
+      description: request.description,
+      ownerSub: user.sub,
+      ownerName: user.name,
+      status: "private",
+      kind: "html",
+      version: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      findings: [],
+      ...(audit?.sourceIp !== undefined ? { sourceIp: audit.sourceIp } : {}),
+      ...(audit?.userAgent !== undefined ? { userAgent: audit.userAgent } : {}),
+    };
+    await this.repo.create(meta);
+    return this.ingest(meta, data);
+  }
+
   /** Presigned upload for overwriting an existing report (owner or admin). */
   async issueUploadUrl(
     user: AuthUser,

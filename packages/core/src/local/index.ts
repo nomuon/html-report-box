@@ -4,6 +4,7 @@
  */
 import type { AuthVerifier, SecurityScanner, SessionAuth, UserAdmin, ZipExtractor } from "../ports.ts";
 import { ReportService } from "../report-service.ts";
+import { LocalApiKeyStore } from "./api-keys.ts";
 import { DevAuthVerifier } from "./auth.ts";
 import { GoogleAuthVerifier } from "./google-auth.ts";
 import type { GoogleIdTokenVerifier } from "./google-auth.ts";
@@ -21,6 +22,7 @@ export {
   type GoogleIdTokenVerifier,
 } from "./google-auth.ts";
 export { JsonStore } from "./json-store.ts";
+export { LocalApiKeyStore } from "./api-keys.ts";
 export { LocalObjectStorage } from "./object-storage.ts";
 export { LocalReportRepository } from "./repository.ts";
 export { LocalSearchIndex } from "./search-index.ts";
@@ -61,6 +63,7 @@ export interface LocalContext {
   userAdmin: UserAdmin;
   domainReputation: StubDomainReputation;
   scanner: SecurityScanner;
+  apiKeys: LocalApiKeyStore;
   service: ReportService;
 }
 
@@ -77,6 +80,7 @@ export function createLocalContext(options: LocalContextOptions = {}): LocalCont
   const userAdmin = googleAuth ? googleAuth.userAdmin() : new LocalUserAdmin();
   const domainReputation = new StubDomainReputation();
   const scanner = options.scanner ?? new PassthroughScanner();
+  const apiKeys = new LocalApiKeyStore(dataDir, options.now ? { now: options.now } : {});
 
   const service = new ReportService({
     repo,
@@ -103,6 +107,7 @@ export function createLocalContext(options: LocalContextOptions = {}): LocalCont
     userAdmin,
     domainReputation,
     scanner,
+    apiKeys,
     service,
   };
 }

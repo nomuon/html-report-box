@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { createLocalContext, StubDomainReputation } from "@hrb/core/local";
 import { createScanner, createZipExtractor } from "@hrb/scanner";
-import { bearerApiKeyAuth, createMcpApp } from "@hrb/mcp";
+import { createMcpApp } from "@hrb/mcp";
 import { createApp } from "../app.ts";
 import { createRouteHandlers } from "./routes.ts";
 import { resolveServerConfig } from "./server-config.ts";
@@ -44,14 +44,27 @@ const app = createApp({
   service: ctx.service,
   auth: ctx.auth,
   ...(ctx.sessionAuth ? { sessionAuth: ctx.sessionAuth } : {}),
+  apiKeys: ctx.apiKeys,
   userAdmin: ctx.userAdmin,
   contentBaseUrl: config.contentOrigin,
 });
 
 const mcpRoot = new Hono();
-// vps では MCP_API_KEY 必須（server-config が担保）。dev もキー設定時のみ認証。
-mcpRoot.use("/mcp", bearerApiKeyAuth(config.mcpApiKey ?? undefined));
-mcpRoot.route("/mcp", createMcpApp({ reportService: ctx.service, objectStorage: ctx.storage }));
+// 認証は createMcpApp 内で解決: per-user "hrb_" キーはそのユーザーとして動作、
+// 静的キー（vps では MCP_API_KEY 必須、server-config が担保）は匿名・読み取り専用。
+// dev はキーレス（匿名・読み取り専用）でも接続できる。
+mcpRoot.route(
+  "/mcp",
+  createMcpApp(
+    {
+      reportService: ctx.service,
+      objectStorage: ctx.storage,
+      apiKeys: ctx.apiKeys,
+      appBaseUrl: config.appOrigin,
+    },
+    config.mcpApiKey ? { staticApiKey: config.mcpApiKey } : {},
+  ),
+);
 
 const handlers = createRouteHandlers({
   app,
@@ -144,5 +157,9 @@ console.log(
 );
 console.log(`${tag}   scanner  : @hrb/scanner (StubDomainReputation) + zip extractor`);
 console.log(
-  `${tag}   mcp      : POST ${config.appOrigin}/mcp${config.mcpApiKey ? " (Bearer API key)" : " (no API key)"}`,
+  `${tag}   mcp      : POST ${config.appOrigin}/mcp${
+    config.mcpApiKey
+      ? " (Bearer: 静的キー=読み取り専用 / per-user hrb_ キー=書き込み可)"
+      : " (キーレス=読み取り専用 / per-user hrb_ キー=書き込み可)"
+  }`,
 );

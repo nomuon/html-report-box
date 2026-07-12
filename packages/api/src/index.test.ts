@@ -896,6 +896,31 @@ test("admin user deletion: cascades into owned reports", async () => {
   expect(search.json.results).toEqual([]);
 });
 
+test("admin user deletion: revokes the user's API keys (other users' keys survive)", async () => {
+  const env = makeEnv();
+  // makeEnv() は apiKeys を配線しないので、このテスト専用に配線した app を作る。
+  const app = createApp({
+    service: env.ctx.service,
+    auth: env.ctx.auth,
+    userAdmin: env.ctx.userAdmin,
+    apiKeys: env.ctx.apiKeys,
+    contentBaseUrl: BASE,
+  });
+  const aliceKey = await call(app, "POST", "/me/api-keys", { user: "alice", body: { name: "mcp" } });
+  expect(aliceKey.status).toBe(201);
+  const bobKey = await call(app, "POST", "/me/api-keys", { user: "bob", body: { name: "mcp" } });
+  expect(bobKey.status).toBe(201);
+  expect(await env.ctx.apiKeys.verify(aliceKey.json.plaintext)).not.toBeNull();
+
+  const res = await call(app, "DELETE", "/admin/users/alice", { user: "admin" });
+  expect(res.status).toBe(200);
+
+  // 削除されたユーザーのキーは verify で解決されなくなる（ゴースト sub 防止）。
+  expect(await env.ctx.apiKeys.verify(aliceKey.json.plaintext)).toBeNull();
+  // 他ユーザーのキーは影響を受けない。
+  expect(await env.ctx.apiKeys.verify(bobKey.json.plaintext)).not.toBeNull();
+});
+
 test("admin user deletion: guards (self 400, unknown 404, non-admin 403)", async () => {
   const env = makeEnv();
   const self = await call(env.app, "DELETE", "/admin/users/admin", { user: "admin" });

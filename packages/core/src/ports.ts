@@ -4,6 +4,7 @@
  */
 import type {
   AdminUser,
+  ApiKey,
   AuthConfig,
   ListOrder,
   PresignedUpload,
@@ -45,6 +46,38 @@ export interface SessionAuth {
   loginWithGoogle(credential: string): Promise<{ token: string; user: SessionUser }>;
   /** Revokes the session token. Unknown tokens are a no-op. */
   logout(token: string): Promise<void>;
+}
+
+// ---- Per-user API keys (MCP 等のプログラマティックアクセス) ----
+
+/** Key owner captured at issue time (name is denormalized like ReportMeta.ownerName). */
+export interface ApiKeyOwner {
+  sub: string;
+  name: string;
+}
+
+/** verify() resolution: which user a presented plaintext key belongs to. */
+export interface VerifiedApiKey {
+  ownerSub: string;
+  ownerName: string;
+  keyId: string;
+}
+
+/**
+ * Per-user API key store. Only the sha256 hash of a key is persisted; the
+ * plaintext is returned exactly once from issue().
+ */
+export interface ApiKeyStore {
+  issue(owner: ApiKeyOwner, name: string): Promise<{ key: ApiKey; plaintext: string }>;
+  /** Keys of one owner, newest first (metadata only — never the plaintext/hash). */
+  list(ownerSub: string): Promise<ApiKey[]>;
+  /** Throws DomainError("not_found") when the owner has no such key. */
+  revoke(ownerSub: string, keyId: string): Promise<void>;
+  /**
+   * Resolve a plaintext key to its owner (hash equality), or null when
+   * unknown/revoked. Updates lastUsedAt best-effort.
+   */
+  verify(plaintext: string): Promise<VerifiedApiKey | null>;
 }
 
 // ---- Pagination ----

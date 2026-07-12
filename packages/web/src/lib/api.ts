@@ -12,9 +12,11 @@ import type {
   AdminListUsersResponse,
   AdminReportActionResponse,
   CompleteReportResponse,
+  CreateApiKeyResponse,
   CreateReportRequestInput,
   CreateReportResponse,
   CreateUploadUrlResponse,
+  DeleteApiKeyResponse,
   DeleteReportResponse,
   ErrorCode,
   FlagReportResponse,
@@ -22,6 +24,7 @@ import type {
   GetQuotaResponse,
   GetReportResponse,
   GetReportSourceResponse,
+  ListApiKeysResponse,
   ListOrder,
   ListReportsResponse,
   MyReportsResponse,
@@ -197,6 +200,21 @@ export class ApiClient {
 
   deleteReport(id: string): Promise<DeleteReportResponse> {
     return this.request("DELETE", `/reports/${encodeURIComponent(id)}`);
+  }
+
+  // ---- API キー（MCP 等のプログラマティックアクセス用） ----
+
+  listApiKeys(): Promise<ListApiKeysResponse> {
+    return this.request("GET", "/me/api-keys");
+  }
+
+  /** 発行。plaintext はこのレスポンス限り（以後取得できない）。 */
+  createApiKey(name: string): Promise<CreateApiKeyResponse> {
+    return this.request("POST", "/me/api-keys", { body: { name } });
+  }
+
+  deleteApiKey(keyId: string): Promise<DeleteApiKeyResponse> {
+    return this.request("DELETE", `/me/api-keys/${encodeURIComponent(keyId)}`);
   }
 
   // ---- admin ----

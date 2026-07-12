@@ -14,6 +14,7 @@ export const DEPENDS_ON = SHARED_PACKAGE_NAME;
 
 export * from "./ports.ts";
 export * from "./errors.ts";
+export * from "./api-keys.ts";
 export { generateId } from "./id.ts";
 export { contentTypeForPath } from "./content-type.ts";
 export { extractHtml, type HtmlExtraction } from "./html/extract.ts";

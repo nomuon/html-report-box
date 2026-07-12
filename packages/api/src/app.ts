@@ -15,9 +15,11 @@ import type { ZodType } from "zod";
 import {
   AdminListReportsQuerySchema,
   CompleteReportRequestSchema,
+  CreateApiKeyRequestSchema,
   CreateReportRequestSchema,
   CreateUploadUrlRequestSchema,
   DAILY_UPLOAD_LIMIT,
+  MAX_API_KEYS_PER_USER,
   FlagReportRequestSchema,
   GoogleLoginRequestSchema,
   ListReportsQuerySchema,
@@ -35,7 +37,7 @@ import {
 } from "@hrb/shared";
 import type { GetConfigResponse } from "@hrb/shared";
 import { DomainError, isDomainError } from "@hrb/core";
-import type { AuthUser, AuthVerifier, PageOptions, ReportService, SessionAuth, UserAdmin } from "@hrb/core";
+import type { ApiKeyStore, AuthUser, AuthVerifier, PageOptions, ReportService, SessionAuth, UserAdmin } from "@hrb/core";
 import { createMemoryRateLimiter } from "./rate-limit.ts";
 import type { RateLimiter } from "./rate-limit.ts";
 
@@ -48,6 +50,8 @@ export interface AppContext {
   auth: AuthVerifier;
   /** Login/logout endpoints (google mode). Absent → routes are not mounted. */
   sessionAuth?: SessionAuth;
+  /** Per-user API keys (/me/api-keys). Absent → routes are not mounted. */
+  apiKeys?: ApiKeyStore;
   userAdmin: UserAdmin;
   /** Origin serving uploaded content, e.g. http://localhost:3000 (GET /config). */
   contentBaseUrl: string;
@@ -276,6 +280,35 @@ export function createApp(ctx: AppContext): AppType {
     return c.json(await ctx.service.getUploadQuota(mustUser(c)));
   });
 
+  // Per-user API keys (MCP 等のプログラマティックアクセス用)。平文は発行
+  // レスポンスで一度だけ返す（保存されるのはハッシュのみ）。
+  const apiKeys = ctx.apiKeys;
+  if (apiKeys) {
+    app.get("/me/api-keys", requireAuth, async (c) => {
+      const keys = await apiKeys.list(mustUser(c).sub);
+      return c.json({ keys });
+    });
+
+    app.post("/me/api-keys", requireAuth, async (c) => {
+      const body = parseWith(CreateApiKeyRequestSchema, await readJson(c), "api key");
+      const user = mustUser(c);
+      const existing = await apiKeys.list(user.sub);
+      if (existing.length >= MAX_API_KEYS_PER_USER) {
+        throw new DomainError(
+          "conflict",
+          `api key limit (${MAX_API_KEYS_PER_USER}) reached; revoke an unused key first`,
+        );
+      }
+      const { key, plaintext } = await apiKeys.issue({ sub: user.sub, name: user.name }, body.name);
+      return c.json({ key, plaintext }, 201);
+    });
+
+    app.delete("/me/api-keys/:keyId", requireAuth, async (c) => {
+      await apiKeys.revoke(mustUser(c).sub, c.req.param("keyId"));
+      return c.json({ ok: true as const });
+    });
+  }
+
   app.post("/reports", requireAuth, async (c) => {
     const body = parseWith(CreateReportRequestSchema, await readJson(c), "report");
     const { report, upload } = await ctx.service.create(
@@ -411,6 +444,13 @@ export function createApp(ctx: AppContext): AppType {
     if (sub === null) throw new DomainError("not_found", "user not found");
     if (sub === me.sub) throw new DomainError("bad_request", "cannot delete your own account");
     const deletedReports = await ctx.service.adminDeleteByOwner(me, sub);
+    // Revoke every API key the user issued — otherwise verify() would keep
+    // resolving them to the deleted sub and MCP write tools would still work.
+    if (apiKeys) {
+      for (const key of await apiKeys.list(sub)) {
+        await apiKeys.revoke(sub, key.keyId);
+      }
+    }
     await ctx.userAdmin.deleteUser(username);
     return c.json({ ok: true as const, deletedReports });
   });
