@@ -15,6 +15,7 @@ import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Modal } from "../components/Modal.tsx";
 import { PublishToggle } from "../components/PublishToggle.tsx";
+import { DetailHeaderSkeleton } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import {
   EditHtmlModal,
@@ -110,8 +111,8 @@ export function ReportDetailPage() {
 
   if (query.isLoading) {
     return (
-      <div className="hrb-page">
-        <p className="hrb-loading">読み込み中…</p>
+      <div className="hrb-detail">
+        <DetailHeaderSkeleton />
       </div>
     );
   }

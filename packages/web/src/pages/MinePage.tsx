@@ -10,6 +10,7 @@ import { StatusChip } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { PublishToggle } from "../components/PublishToggle.tsx";
+import { TableSkeleton } from "../components/Skeleton.tsx";
 import {
   DeleteReportModal,
   EditHtmlModal,
@@ -55,7 +56,7 @@ export function MinePage() {
         <h1 className="hrb-page__title">マイレポート</h1>
       </div>
 
-      {query.isLoading && <p className="hrb-loading">読み込み中…</p>}
+      {query.isLoading && <TableSkeleton columns={4} />}
 
       {!query.isLoading && reports.length === 0 && (
         <EmptyState

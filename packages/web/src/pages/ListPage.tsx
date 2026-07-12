@@ -9,6 +9,7 @@ import { KindChip, StatusChip } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Highlight } from "../components/Highlight.tsx";
 import { Icon } from "../components/Icon.tsx";
+import { CardsSkeleton, TableSkeleton } from "../components/Skeleton.tsx";
 import { formatDateTime } from "../lib/format.ts";
 
 type ViewMode = "table" | "card";
@@ -248,7 +249,7 @@ export function ListPage() {
         </div>
       )}
 
-      {loading && <p className="hrb-loading">読み込み中…</p>}
+      {loading && (view === "table" ? <TableSkeleton columns={5} /> : <CardsSkeleton />)}
 
       {!loading && reports.length === 0 && (
         isSearch ? (

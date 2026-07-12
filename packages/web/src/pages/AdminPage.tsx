@@ -10,6 +10,7 @@ import { KindChip, STATUS_LABELS, StatusChip } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Modal } from "../components/Modal.tsx";
+import { TableSkeleton } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { isApiError } from "../lib/api.ts";
 import { formatDateTime } from "../lib/format.ts";
@@ -70,7 +71,7 @@ function FlaggedTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
   });
   const items = query.data?.pages.flatMap((p) => p.items) ?? [];
 
-  if (query.isLoading) return <p className="hrb-loading">読み込み中…</p>;
+  if (query.isLoading) return <TableSkeleton columns={6} />;
   if (items.length === 0)
     return <EmptyState icon={<Icon name="check-circle" size={30} />} title="未対応の通報はありません" />;
 
@@ -209,7 +210,7 @@ function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
         ))}
       </div>
 
-      {query.isLoading && <p className="hrb-loading">読み込み中…</p>}
+      {query.isLoading && <TableSkeleton columns={6} />}
       {!query.isLoading && reports.length === 0 && (
         <EmptyState icon={<Icon name="inbox" size={30} />} title="レポートがありません" />
       )}
@@ -280,7 +281,7 @@ function UsersTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
   });
   const users = query.data?.pages.flatMap((p) => p.users) ?? [];
 
-  if (query.isLoading) return <p className="hrb-loading">読み込み中…</p>;
+  if (query.isLoading) return <TableSkeleton columns={4} />;
   if (users.length === 0)
     return <EmptyState icon={<Icon name="users" size={30} />} title="ユーザーがいません" />;
 
