@@ -9,6 +9,7 @@
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun test",
     "seed": "bun run packages/core/scripts/seed.ts",
+    "seed:prod": "bun run packages/core/scripts/seed-prod.ts",
     "dev": "bun --hot packages/api/src/local/server.ts",
     "start": "bun packages/api/src/local/server.ts"
   },

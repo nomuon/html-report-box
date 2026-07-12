@@ -81,6 +81,7 @@ Lambda に載るコード（shared/core/scanner/api/mcp）は Node 22 互換。B
 ```bash
 bun install                          # 依存導入
 bun run seed                         # サンプル日本語レポート3件を .local-data/ に投入
+bun run seed:prod                    # 本番相当のデータ14件を追加投入（全ステータス・通報・zip・複数バージョン）
 bun run dev                          # http://localhost:3000 （--hot 付き）
 ```
 
