@@ -89,7 +89,7 @@ dev サーバー 1 プロセスで全部入り:
 - `/` … React SPA（Bun HTML import）
 - `/api/*` … Hono API（`x-dev-user: alice | bob | admin` ヘッダーで dev ユーザー切替。admin だけが管理操作可）
 - `/local-upload` … S3 presigned POST のローカル代替
-- `/r/<id>/` … 公開済みレポート配信（コンテンツ CloudFront 相当。dotfile は 404）
+- `/r/<id>/` … 公開済みレポート配信（コンテンツ CloudFront 相当。dotfile は 404。本番と同一の CSP を dev でも付与するため、CSP に違反するレポートは dev でも動かない）
 - `/mcp` … リモート MCP（dev では API キー不要）
 
 データは `.local-data/`（JSON + オブジェクト）に永続化。`HRB_DATA_DIR` / `PORT` 環境変数で変更可能。
