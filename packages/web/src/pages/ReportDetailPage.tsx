@@ -22,10 +22,10 @@ import {
   EditReportModal,
   OverwriteReportModal,
 } from "../components/report-modals.tsx";
+import { VersionHistoryModal } from "../components/VersionHistoryModal.tsx";
 import { isApiError } from "../lib/api.ts";
 import { formatDateTime } from "../lib/format.ts";
-
-const IFRAME_SANDBOX = "allow-scripts allow-forms allow-popups allow-modals";
+import { IFRAME_SANDBOX } from "../lib/sandbox.ts";
 
 function FlagModal({ id, open, onClose }: { id: string; open: boolean; onClose: () => void }) {
   const { api } = useApp();
@@ -77,7 +77,7 @@ function FlagModal({ id, open, onClose }: { id: string; open: boolean; onClose: 
   );
 }
 
-type ModalState = "flag" | "edit-html" | "edit-meta" | "overwrite" | null;
+type ModalState = "flag" | "edit-html" | "edit-meta" | "overwrite" | "versions" | null;
 
 export function ReportDetailPage() {
   const { id = "" } = useParams();
@@ -185,6 +185,10 @@ export function ReportDetailPage() {
                 <Icon name="pencil" size={16} />
                 タイトル・説明
               </Button>
+              <Button variant="secondary" onClick={() => setModal("versions")}>
+                <Icon name="clock" size={16} />
+                バージョン履歴
+              </Button>
             </>
           )}
           {published && (
@@ -256,6 +260,12 @@ export function ReportDetailPage() {
             key={`ow-${report.id}-${modal === "overwrite"}`}
             report={report}
             open={modal === "overwrite"}
+            onClose={() => setModal(null)}
+          />
+          <VersionHistoryModal
+            key={`ver-${report.id}-${modal === "versions"}`}
+            report={report}
+            open={modal === "versions"}
             onClose={() => setModal(null)}
           />
         </>

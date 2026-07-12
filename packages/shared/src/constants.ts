@@ -13,6 +13,10 @@ export const MAX_ZIP_COMPRESSION_RATIO = 100; // reject > 100:1 (zip bomb)
 // ---- Rate limits ----
 export const DAILY_UPLOAD_LIMIT = 30; // uploads per user per day
 
+// ---- Version history ----
+/** 保持する原本バージョン数の上限。超過分は最古から間引かれる。 */
+export const REPORT_VERSION_HISTORY_LIMIT = 20;
+
 // ---- zip entry extension allowlist (lowercase, with leading dot) ----
 export const ZIP_ENTRY_ALLOWED_EXTENSIONS = [
   ".html",

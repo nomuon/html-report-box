@@ -579,6 +579,158 @@ describe("flags (通報)", () => {
   });
 });
 
+describe("version history & rollback", () => {
+  test("ingest keeps every version's original bytes and grows the history", async () => {
+    const { report } = await upload(alice, { title: "履歴対象" }, html("v1", "初版本文"));
+    expect(report.versions).toHaveLength(1);
+    expect(report.versions[0]).toMatchObject({ version: 1, kind: "html", verdict: "pass" });
+
+    const edited = await ctx.service.editContent(alice, report.id, html("v2", "二版本文"));
+    expect(edited.report.version).toBe(2);
+    expect(edited.report.versions.map((v) => v.version)).toEqual([1, 2]);
+
+    // 原本が current と v<version> の両方に残る
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).not.toBeNull();
+    const v1 = await ctx.storage.getContentObject(`sources/${report.id}/v1`);
+    const v2 = await ctx.storage.getContentObject(`sources/${report.id}/v2`);
+    expect(dec.decode(v1!)).toContain("初版本文");
+    expect(dec.decode(v2!)).toContain("二版本文");
+
+    // listVersions は新しい順
+    const listed = await ctx.service.listVersions(alice, report.id);
+    expect(listed.map((v) => v.version)).toEqual([2, 1]);
+    expect(listed[0]!.sizeBytes).toBe(edited.report.sizeBytes!);
+  });
+
+  test("rollback re-ingests the old bytes as a new version with a fresh scan", async () => {
+    // 検索の入れ替わりを見るため、両版で語彙が重ならない本文にする（CJK バイグラム対策）
+    const { report } = await uploadPublished(alice, { title: "戻す対象" }, html("v1", "りんごケーキ"));
+    await ctx.service.editContent(alice, report.id, html("v2", "自動車整備"));
+
+    const rolled = await ctx.service.rollback(alice, report.id, 1);
+    expect(rolled.report.version).toBe(3);
+    expect(rolled.report.status).toBe("published"); // 公開中のまま差し替わる
+    expect(rolled.url).toBeDefined();
+    expect(rolled.report.versions.map((v) => v.version)).toEqual([1, 2, 3]);
+
+    // 内容・検索インデックスとも v1 相当に戻る
+    expect((await ctx.service.getSource(alice, report.id)).html).toContain("りんごケーキ");
+    expect((await ctx.service.search("りんご")).results).toHaveLength(1);
+    expect((await ctx.service.search("自動車")).results).toHaveLength(0);
+
+    // 旧版の verdict が warn なら rollback 後も warn として再スキャンされる
+    await ctx.service.editContent(alice, report.id, html("warn", "WARN_ME 注意本文"));
+    const back = await ctx.service.rollback(alice, report.id, 4);
+    expect(back.report.verdict).toBe("warn");
+    expect(back.report.findings[0]?.ruleId).toBe("test.warn");
+  });
+
+  test("rollback re-runs the scan: content that now blocks lands rejected and purges", async () => {
+    // 判定を後から差し替えられるスキャナで「当時 pass、今は block」を再現する
+    let blockAll = false;
+    const flip = createLocalContext({
+      dataDir,
+      scanner: {
+        async scan() {
+          return blockAll
+            ? {
+                verdict: "block" as const,
+                findings: [{ ruleId: "test.block", severity: "block" as const, message: "now blocked" }],
+              }
+            : { verdict: "pass" as const, findings: [] };
+        },
+      },
+    });
+    const { report, upload: up } = await flip.service.create(alice, { title: "後日block", kind: "html" });
+    await flip.storage.putStagingObject(up.key, enc.encode(html("v1", "本文")));
+    await flip.service.complete(alice, report.id, up.key);
+    await flip.service.editContent(alice, report.id, html("v2", "本文2"));
+
+    blockAll = true;
+    const rolled = await flip.service.rollback(alice, report.id, 1);
+    expect(rolled.report.status).toBe("rejected");
+    expect(rolled.report.verdict).toBe("block");
+    // sources/ ごと消えるため履歴も空になる
+    expect(rolled.report.versions).toEqual([]);
+    expect(await flip.storage.getContentObject(`sources/${report.id}/v1`)).toBeNull();
+    expect(await flip.storage.getContentObject(`sources/${report.id}/current`)).toBeNull();
+  });
+
+  test("zip 版も原本ごと rollback できる（kind は取り込み時点の値で復元）", async () => {
+    const zipCtx = createLocalContext({
+      dataDir,
+      scanner: markerScanner,
+      zipExtractor: {
+        async extract(data) {
+          return [{ path: "index.html", data }];
+        },
+      },
+    });
+    const { report, upload: up } = await zipCtx.service.create(alice, { title: "zip履歴", kind: "zip" });
+    await zipCtx.storage.putStagingObject(up.key, enc.encode(html("z1", "zip初版")));
+    await zipCtx.service.complete(alice, report.id, up.key);
+
+    const { upload: up2 } = await zipCtx.service.issueUploadUrl(alice, report.id, "zip");
+    await zipCtx.storage.putStagingObject(up2.key, enc.encode(html("z2", "zip二版")));
+    await zipCtx.service.complete(alice, report.id, up2.key);
+
+    const rolled = await zipCtx.service.rollback(alice, report.id, 1);
+    expect(rolled.report.version).toBe(3);
+    expect(rolled.report.kind).toBe("zip");
+    expect(rolled.report.versions.map((v) => v.version)).toEqual([1, 2, 3]);
+    expect((await zipCtx.service.getVersionSource(alice, report.id, 3)).html).toContain("zip初版");
+  });
+
+  test("history is capped: the oldest version objects are trimmed beyond the limit", async () => {
+    // 上限を意識した回数（22回）取り込み、古い2版がメタ・オブジェクト双方から消えること
+    const { report } = await upload(alice, { title: "上限テスト" }, html("v1", "本文1"));
+    for (let i = 2; i <= 22; i++) {
+      await ctx.service.editContent(alice, report.id, html(`v${i}`, `本文${i}`));
+    }
+    const listed = await ctx.service.listVersions(alice, report.id);
+    expect(listed).toHaveLength(20);
+    expect(listed[0]!.version).toBe(22);
+    expect(listed[listed.length - 1]!.version).toBe(3);
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v1`)).toBeNull();
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v2`)).toBeNull();
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v3`)).not.toBeNull();
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v22`)).not.toBeNull();
+    // 間引かれた版へは rollback できない
+    await expectDomainError(ctx.service.rollback(alice, report.id, 1), "not_found");
+  });
+
+  test("purge (delete) removes every version object", async () => {
+    const { report } = await upload(alice, { title: "全削除" }, html("v1", "本文"));
+    await ctx.service.editContent(alice, report.id, html("v2", "本文2"));
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v2`)).not.toBeNull();
+
+    await ctx.service.delete(alice, report.id);
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v1`)).toBeNull();
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v2`)).toBeNull();
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).toBeNull();
+  });
+
+  test("authorization: versions APIs are owner/admin only; unknown versions → not_found", async () => {
+    const { report } = await upload(alice, { title: "履歴の権限" }, html("v1", "本文"));
+
+    await expectDomainError(ctx.service.listVersions(bob, report.id), "forbidden");
+    await expectDomainError(ctx.service.getVersionSource(bob, report.id, 1), "forbidden");
+    await expectDomainError(ctx.service.rollback(bob, report.id, 1), "forbidden");
+
+    // admin は閲覧・復元とも可能
+    expect(await ctx.service.listVersions(admin, report.id)).toHaveLength(1);
+    expect((await ctx.service.getVersionSource(admin, report.id, 1)).html).toContain("本文");
+
+    await expectDomainError(ctx.service.getVersionSource(alice, report.id, 99), "not_found");
+    await expectDomainError(ctx.service.rollback(alice, report.id, 99), "not_found");
+
+    // rollback もクォータを消費する（同じ dataDir を上限1で読み直して検証）
+    const { report: q } = await upload(alice, { title: "クォータ" }, html("q1", "本文"));
+    const limited = createLocalContext({ dataDir, scanner: markerScanner, dailyUploadLimit: 1 });
+    await expectDomainError(limited.service.rollback(alice, q.id, 1), "rate_limited");
+  });
+});
+
 describe("persistence", () => {
   test("state survives a context restart (JSON reload)", async () => {
     const { report } = await uploadPublished(alice, { title: "永続化テスト" }, html("p", "再起動後も残る本文"));

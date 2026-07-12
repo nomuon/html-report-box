@@ -13,6 +13,7 @@ import {
   ReportKindSchema,
   ReportStatusSchema,
   ReportTitleSchema,
+  ReportVersionSchema,
   ScanFindingSchema,
   ScanVerdictSchema,
 } from "./report.ts";
@@ -343,6 +344,40 @@ export const UpdateReportContentResponseSchema = z.object({
   url: z.string().optional(),
 });
 export type UpdateReportContentResponse = z.infer<typeof UpdateReportContentResponseSchema>;
+
+// =====================
+// GET /reports/:id/versions (auth, owner or admin) — バージョン履歴（新しい順）
+// =====================
+export const ListReportVersionsResponseSchema = z.object({
+  versions: z.array(ReportVersionSchema),
+});
+export type ListReportVersionsResponse = z.infer<typeof ListReportVersionsResponseSchema>;
+
+// =====================
+// GET /reports/:id/versions/:version/source (auth, owner or admin) — 旧版 HTML
+// =====================
+export const GetReportVersionSourceResponseSchema = z.object({
+  kind: ReportKindSchema,
+  /** html kind: 保存された原本。zip kind: 展開した root index.html（読み取り専用プレビュー）。 */
+  html: z.string(),
+});
+export type GetReportVersionSourceResponse = z.infer<typeof GetReportVersionSourceResponseSchema>;
+
+// =====================
+// POST /reports/:id/rollback (auth, owner or admin) — 旧版を新しい版として再取り込み
+// （editContent と同じパス: フルスキャン再実行・version は単調増加）
+// =====================
+export const RollbackReportRequestSchema = z.object({
+  version: z.number().int().min(1),
+});
+export type RollbackReportRequest = z.infer<typeof RollbackReportRequestSchema>;
+
+export const RollbackReportResponseSchema = z.object({
+  report: OwnedReportSchema,
+  /** Present when the report is (still) published. */
+  url: z.string().optional(),
+});
+export type RollbackReportResponse = z.infer<typeof RollbackReportResponseSchema>;
 
 // =====================
 // DELETE /reports/:id (auth, owner or admin)

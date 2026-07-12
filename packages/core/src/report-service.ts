@@ -2,8 +2,8 @@
  * ReportService — domain logic for the report lifecycle:
  * create (META + presigned upload) → complete (validate → extract → scan →
  * private / rejected) → publish / unpublish (owner-controlled visibility) →
- * list / get / search / update / editContent / delete, plus admin takedown
- * and abuse flags (通報).
+ * list / get / search / update / editContent / delete, version history +
+ * rollback, plus admin takedown and abuse flags (通報).
  * Portable (Node 22); no Bun-only APIs.
  */
 import { createHash } from "node:crypto";
@@ -13,6 +13,7 @@ import {
   MAX_HTML_SIZE_BYTES,
   MAX_ZIP_SIZE_BYTES,
   REPORT_DESCRIPTION_MAX,
+  REPORT_VERSION_HISTORY_LIMIT,
   UpdateReportRequestSchema,
   buildDocumentTokens,
   tokenizeQuery,
@@ -24,6 +25,7 @@ import type {
   ReportKind,
   ReportMeta,
   ReportStatus,
+  ReportVersion,
   SearchResult,
   UpdateReportRequest,
 } from "@hrb/shared";
@@ -223,6 +225,7 @@ export class ReportService {
       createdAt: nowIso,
       updatedAt: nowIso,
       findings: [],
+      versions: [],
       ...(audit?.sourceIp !== undefined ? { sourceIp: audit.sourceIp } : {}),
       ...(audit?.userAgent !== undefined ? { userAgent: audit.userAgent } : {}),
     };
@@ -270,6 +273,7 @@ export class ReportService {
       createdAt: nowIso,
       updatedAt: nowIso,
       findings: [],
+      versions: [],
       ...(audit?.sourceIp !== undefined ? { sourceIp: audit.sourceIp } : {}),
       ...(audit?.userAgent !== undefined ? { userAgent: audit.userAgent } : {}),
     };
@@ -436,6 +440,67 @@ export class ReportService {
     }
     await this.consumeUploadQuota(user);
     return this.ingest(meta, data);
+  }
+
+  /** バージョン履歴（owner or admin）。新しい版が先頭。 */
+  async listVersions(user: AuthUser, id: string): Promise<ReportVersion[]> {
+    const meta = await this.mustGet(id);
+    this.assertOwnerOrAdmin(user, meta);
+    if (meta.status === "takedown" && !user.isAdmin) {
+      throw new DomainError("forbidden", "report was taken down by an administrator");
+    }
+    return [...(meta.versions ?? [])].reverse();
+  }
+
+  /**
+   * 旧版の HTML（owner or admin）。getSource と同じ形:
+   * html kind → 保存された原本、zip kind → 展開した root index.html。
+   */
+  async getVersionSource(
+    user: AuthUser,
+    id: string,
+    version: number,
+  ): Promise<{ kind: ReportKind; html: string }> {
+    const meta = await this.mustGet(id);
+    this.assertOwnerOrAdmin(user, meta);
+    if (meta.status === "takedown" && !user.isAdmin) {
+      throw new DomainError("forbidden", "report was taken down by an administrator");
+    }
+    const entry = (meta.versions ?? []).find((v) => v.version === version);
+    if (!entry) throw new DomainError("not_found", "version not found");
+    const data = await this.storage.getContentObject(this.versionKey(id, version));
+    if (!data) throw new DomainError("not_found", "version content not found");
+    if (entry.kind === "html") {
+      return { kind: "html", html: new TextDecoder().decode(data) };
+    }
+    const { files } = await this.extractFiles("zip", data);
+    const index = files.find((f) => f.path === "index.html");
+    return { kind: "zip", html: new TextDecoder().decode(index?.data ?? new Uint8Array()) };
+  }
+
+  /**
+   * 旧版の原本を editContent と同じパスで再取り込み（owner or admin）:
+   * フルスキャン再実行・新しい version として履歴に積む。zip 版も原本
+   * （zip バイト列）をそのまま再取り込みする。日次クォータを消費する。
+   */
+  async rollback(
+    user: AuthUser,
+    id: string,
+    version: number,
+  ): Promise<{ report: ReportMeta; url?: string }> {
+    const meta = await this.mustGet(id);
+    this.assertOwnerOrAdmin(user, meta);
+    if (meta.status === "takedown" && !user.isAdmin) {
+      throw new DomainError("forbidden", "report was taken down by an administrator");
+    }
+    const entry = (meta.versions ?? []).find((v) => v.version === version);
+    if (!entry) throw new DomainError("not_found", "version not found");
+    const data = await this.storage.getContentObject(this.versionKey(id, version));
+    if (!data) throw new DomainError("not_found", "version content not found");
+    await this.consumeUploadQuota(user);
+    // kind は取り込み時点の値で復元する（zip 原本を html として扱わない）。
+    const target: ReportMeta = { ...meta, kind: entry.kind };
+    return this.ingest(target, data);
   }
 
   async update(user: AuthUser, id: string, patch: UpdateReportRequest): Promise<ReportMeta> {
@@ -645,6 +710,11 @@ export class ReportService {
     return `sources/${id}/current`;
   }
 
+  /** Storage key of one retained version's original bytes. */
+  private versionKey(id: string, version: number): string {
+    return `sources/${id}/v${version}`;
+  }
+
   /**
    * Canonical uploaded bytes for editing / (re-)publishing. Reports stored
    * before the sources/ prefix existed only have the public copy — recover
@@ -686,6 +756,7 @@ export class ReportService {
       sizeBytes: data.byteLength,
       version: isOverwrite ? meta.version + 1 : meta.version,
       updatedAt: this.now().toISOString(),
+      versions: [...(meta.versions ?? [])],
     };
 
     const scan = await this.scanner.scan({ kind: meta.kind, data });
@@ -694,6 +765,8 @@ export class ReportService {
 
     if (scan.verdict === "block") {
       next.status = "rejected";
+      // sources/ prefix ごと消えるため、バージョン履歴も空にする。
+      next.versions = [];
       await this.removeFromIndex(id);
       await this.storage.deleteContentPrefix(`reports/${id}/`);
       await this.storage.deleteContentPrefix(`sources/${id}/`);
@@ -708,11 +781,22 @@ export class ReportService {
     if (next.description === "" && extraction.description) {
       next.description = extraction.description.slice(0, REPORT_DESCRIPTION_MAX);
     }
-    await this.storage.putContentObject(
-      this.sourceKey(id),
-      data,
-      next.kind === "html" ? "text/html; charset=utf-8" : "application/zip",
-    );
+    const contentType = next.kind === "html" ? "text/html; charset=utf-8" : "application/zip";
+    await this.storage.putContentObject(this.sourceKey(id), data, contentType);
+    // バージョン履歴: 原本を sources/<id>/v<version> にも残し、上限超過分は
+    // 最古から間引く（メタとオブジェクトの両方）。
+    await this.storage.putContentObject(this.versionKey(id, next.version), data, contentType);
+    next.versions.push({
+      version: next.version,
+      kind: next.kind,
+      createdAt: next.updatedAt,
+      sizeBytes: data.byteLength,
+      verdict: scan.verdict,
+    });
+    while (next.versions.length > REPORT_VERSION_HISTORY_LIMIT) {
+      const oldest = next.versions.shift()!;
+      await this.storage.deleteContentObject(this.versionKey(id, oldest.version));
+    }
 
     if (meta.status === "published") {
       await this.writePublic(next, files, extraction.text);

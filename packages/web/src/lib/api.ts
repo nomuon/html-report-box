@@ -24,13 +24,16 @@ import type {
   GetQuotaResponse,
   GetReportResponse,
   GetReportSourceResponse,
+  GetReportVersionSourceResponse,
   ListApiKeysResponse,
   ListOrder,
   ListReportsResponse,
+  ListReportVersionsResponse,
   MyReportsResponse,
   PublishReportResponse,
   ReportKind,
   ReportStatus,
+  RollbackReportResponse,
   SearchResponse,
   UnpublishReportResponse,
   UpdateReportContentResponse,
@@ -195,6 +198,26 @@ export class ApiClient {
   updateReportContent(id: string, html: string): Promise<UpdateReportContentResponse> {
     return this.request("PUT", `/reports/${encodeURIComponent(id)}/content`, {
       body: { html },
+    });
+  }
+
+  /** バージョン履歴（owner/admin のみ、新しい順）。 */
+  listReportVersions(id: string): Promise<ListReportVersionsResponse> {
+    return this.request("GET", `/reports/${encodeURIComponent(id)}/versions`);
+  }
+
+  /** 旧版の HTML（owner/admin のみ）。 */
+  getReportVersionSource(id: string, version: number): Promise<GetReportVersionSourceResponse> {
+    return this.request(
+      "GET",
+      `/reports/${encodeURIComponent(id)}/versions/${encodeURIComponent(String(version))}/source`,
+    );
+  }
+
+  /** 旧版を新しい版として復元（サーバー側でフルスキャン再実行）。 */
+  rollbackReport(id: string, version: number): Promise<RollbackReportResponse> {
+    return this.request("POST", `/reports/${encodeURIComponent(id)}/rollback`, {
+      body: { version },
     });
   }
 

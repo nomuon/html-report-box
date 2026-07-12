@@ -177,6 +177,8 @@ export interface ObjectStorage {
   deleteStagingObject(key: string): Promise<void>;
   putContentObject(key: string, data: Uint8Array, contentType: string): Promise<void>;
   getContentObject(key: string): Promise<Uint8Array | null>;
+  /** Delete a single content object. Missing keys are a no-op. */
+  deleteContentObject(key: string): Promise<void>;
   /** Delete every content object whose key starts with `prefix`. */
   deleteContentPrefix(prefix: string): Promise<void>;
 }

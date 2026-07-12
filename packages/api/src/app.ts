@@ -28,6 +28,7 @@ import {
   MAX_ZIP_SIZE_BYTES,
   MAX_ZIP_UNCOMPRESSED_BYTES,
   PaginationQuerySchema,
+  RollbackReportRequestSchema,
   SearchQuerySchema,
   UpdateReportContentRequestSchema,
   UpdateReportRequestSchema,
@@ -347,6 +348,33 @@ export function createApp(ctx: AppContext): AppType {
   app.get("/reports/:id/source", requireAuth, async (c) => {
     const source = await ctx.service.getSource(mustUser(c), c.req.param("id"));
     return c.json(source);
+  });
+
+  app.get("/reports/:id/versions", requireAuth, async (c) => {
+    const versions = await ctx.service.listVersions(mustUser(c), c.req.param("id"));
+    return c.json({ versions });
+  });
+
+  app.get("/reports/:id/versions/:version/source", requireAuth, async (c) => {
+    const raw = c.req.param("version");
+    if (!/^\d+$/.test(raw)) {
+      throw new DomainError("validation_failed", "version must be a positive integer");
+    }
+    const source = await ctx.service.getVersionSource(
+      mustUser(c),
+      c.req.param("id"),
+      Number.parseInt(raw, 10),
+    );
+    return c.json(source);
+  });
+
+  app.post("/reports/:id/rollback", requireAuth, async (c) => {
+    const body = parseWith(RollbackReportRequestSchema, await readJson(c), "rollback");
+    const { report, url } = await ctx.service.rollback(mustUser(c), c.req.param("id"), body.version);
+    return c.json({
+      report: toOwnedReport(report),
+      ...(url !== undefined ? { url } : {}),
+    });
   });
 
   app.put("/reports/:id/content", requireAuth, async (c) => {

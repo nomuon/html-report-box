@@ -26,6 +26,7 @@ function report(status: OwnedReport["status"], findings: OwnedReport["findings"]
     createdAt: "2026-07-10T00:00:00Z",
     updatedAt: "2026-07-10T00:00:00Z",
     findings,
+    versions: [],
   };
 }
 

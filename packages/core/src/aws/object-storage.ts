@@ -140,6 +140,12 @@ export class S3ObjectStorage implements ObjectStorage {
     return this.getObject(this.contentBucket, key);
   }
 
+  async deleteContentObject(key: string): Promise<void> {
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.contentBucket, Key: key }),
+    );
+  }
+
   async deleteContentPrefix(prefix: string): Promise<void> {
     let continuationToken: string | undefined;
     do {

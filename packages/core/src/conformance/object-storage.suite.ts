@@ -58,6 +58,19 @@ export function runObjectStorageConformance(name: string, factory: ObjectStorage
       await storage.deleteStagingObject("staging/r1/u1");
     });
 
+    test("deleteContentObject removes exactly one key (v1 と v10 のような前方一致キーを巻き込まない)", async () => {
+      const { storage } = await factory();
+      await storage.putContentObject("sources/r/v1", bytes("v1"), "text/html");
+      await storage.putContentObject("sources/r/v10", bytes("v10"), "text/html");
+
+      await storage.deleteContentObject("sources/r/v1");
+
+      expect(await storage.getContentObject("sources/r/v1")).toBeNull();
+      expectBytes(await storage.getContentObject("sources/r/v10"), bytes("v10"));
+      // 存在しないキーの delete は no-op（throw しない）。
+      await storage.deleteContentObject("sources/r/v1");
+    });
+
     test("deleteContentPrefix removes only keys under the prefix", async () => {
       const { storage } = await factory();
       await storage.putContentObject("reports/a/index.html", bytes("a-index"), "text/html");

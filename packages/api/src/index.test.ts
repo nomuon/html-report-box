@@ -748,6 +748,127 @@ test("block verdict → rejected immediately, findings visible to owner", async 
 });
 
 // =====================
+// Version history & rollback
+// =====================
+
+test("GET /reports/:id/versions is owner/admin only and lists newest first", async () => {
+  const env = makeEnv();
+  const { id } = await upload(env, "alice", "Versions v1");
+  await call(env.app, "PUT", `/reports/${id}/content`, {
+    user: "alice",
+    body: { html: "<html><head><title>Versions v2</title></head><body>second body</body></html>" },
+  });
+
+  expect((await call(env.app, "GET", `/reports/${id}/versions`)).status).toBe(401);
+  expect((await call(env.app, "GET", `/reports/${id}/versions`, { user: "bob" })).status).toBe(403);
+
+  const owner = await call(env.app, "GET", `/reports/${id}/versions`, { user: "alice" });
+  expect(owner.status).toBe(200);
+  expect(owner.json.versions.map((v: any) => v.version)).toEqual([2, 1]);
+  expect(owner.json.versions[0]).toMatchObject({ kind: "html", verdict: "pass" });
+  expect(typeof owner.json.versions[0].sizeBytes).toBe("number");
+
+  const admin = await call(env.app, "GET", `/reports/${id}/versions`, { user: "admin" });
+  expect(admin.status).toBe(200);
+  expect(admin.json.versions).toHaveLength(2);
+
+  // 公開ビューにはバージョン履歴を出さない（PublicReport から omit）
+  await call(env.app, "POST", `/reports/${id}/publish`, { user: "alice" });
+  const pub = await call(env.app, "GET", `/reports/${id}`, { user: "bob" });
+  expect(pub.json.report.versions).toBeUndefined();
+});
+
+test("GET /reports/:id/versions/:version/source returns the old html (owner/admin only)", async () => {
+  const env = makeEnv();
+  const { id } = await upload(env, "alice", "Old Source", "<html><body>original body</body></html>");
+  await call(env.app, "PUT", `/reports/${id}/content`, {
+    user: "alice",
+    body: { html: "<html><body>replaced body</body></html>" },
+  });
+
+  const v1 = await call(env.app, "GET", `/reports/${id}/versions/1/source`, { user: "alice" });
+  expect(v1.status).toBe(200);
+  expect(v1.json.kind).toBe("html");
+  expect(v1.json.html).toContain("original body");
+
+  expect((await call(env.app, "GET", `/reports/${id}/versions/1/source`, { user: "bob" })).status).toBe(403);
+  expect((await call(env.app, "GET", `/reports/${id}/versions/1/source`)).status).toBe(401);
+
+  const missing = await call(env.app, "GET", `/reports/${id}/versions/9/source`, { user: "alice" });
+  expect(missing.status).toBe(404);
+  const badParam = await call(env.app, "GET", `/reports/${id}/versions/abc/source`, { user: "alice" });
+  expect(badParam.status).toBe(400);
+  expect(badParam.json.error.code).toBe("validation_failed");
+});
+
+test("POST /reports/:id/rollback restores an old version as a new version (re-scanned)", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Rollback Target", "<html><body>first body</body></html>");
+  await call(env.app, "PUT", `/reports/${id}/content`, {
+    user: "alice",
+    body: { html: "<html><body>second body</body></html>" },
+  });
+
+  // 非オーナーは復元できない / 不明バージョンは 404 / 不正 body は 400
+  expect((await call(env.app, "POST", `/reports/${id}/rollback`, { user: "bob", body: { version: 1 } })).status).toBe(403);
+  expect((await call(env.app, "POST", `/reports/${id}/rollback`, { user: "alice", body: { version: 9 } })).status).toBe(404);
+  expect((await call(env.app, "POST", `/reports/${id}/rollback`, { user: "alice", body: { version: 0 } })).status).toBe(400);
+
+  const rolled = await call(env.app, "POST", `/reports/${id}/rollback`, {
+    user: "alice",
+    body: { version: 1 },
+  });
+  expect(rolled.status).toBe(200);
+  expect(rolled.json.report.version).toBe(3);
+  expect(rolled.json.report.status).toBe("published"); // 公開中は公開のまま差し替え
+  expect(rolled.json.url).toBe(`${BASE}/r/${id}/`);
+  const source = await call(env.app, "GET", `/reports/${id}/source`, { user: "alice" });
+  expect(source.json.html).toContain("first body");
+
+  // rollback もフルスキャンを通る: block になれば rejected
+  env.scanner.next = {
+    verdict: "block",
+    findings: [{ ruleId: "eval-atob", severity: "block", message: "decode-and-execute chain" }],
+  };
+  const blocked = await call(env.app, "POST", `/reports/${id}/rollback`, {
+    user: "alice",
+    body: { version: 2 },
+  });
+  expect(blocked.status).toBe(200);
+  expect(blocked.json.report.status).toBe("rejected");
+  expect(blocked.json.report.versions).toEqual([]);
+  expect((await call(env.app, "GET", `/reports/${id}`)).status).toBe(404);
+});
+
+test("rollback works for zip reports (original zip bytes are re-ingested)", async () => {
+  const env = makeEnv();
+  const { id } = await upload(env, "alice", "Zip Rollback", "<html><body>zip v1</body></html>", "zip");
+  const urlRes = await call(env.app, "POST", `/reports/${id}/upload-url`, {
+    user: "alice",
+    body: { kind: "zip" },
+  });
+  await env.ctx.storage.putStagingObject(
+    urlRes.json.upload.key,
+    new TextEncoder().encode("<html><body>zip v2</body></html>"),
+  );
+  await call(env.app, "POST", `/reports/${id}/complete`, {
+    user: "alice",
+    body: { key: urlRes.json.upload.key },
+  });
+
+  const rolled = await call(env.app, "POST", `/reports/${id}/rollback`, {
+    user: "alice",
+    body: { version: 1 },
+  });
+  expect(rolled.status).toBe(200);
+  expect(rolled.json.report.version).toBe(3);
+  expect(rolled.json.report.kind).toBe("zip");
+  const v3 = await call(env.app, "GET", `/reports/${id}/versions/3/source`, { user: "alice" });
+  expect(v3.json.kind).toBe("zip");
+  expect(v3.json.html).toContain("zip v1");
+});
+
+// =====================
 // Admin takedown
 // =====================
 

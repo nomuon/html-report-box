@@ -46,6 +46,7 @@ const validMeta: ReportMeta = {
   updatedAt: "2026-07-10T12:34:56.000Z",
   verdict: "pass",
   findings: [],
+  versions: [],
   sourceIp: "10.0.0.1",
   userAgent: "Mozilla/5.0",
 };

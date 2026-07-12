@@ -465,6 +465,11 @@
   background: var(--color-surface-2);
 }
 
+.hrb-chip--warn {
+  color: var(--status-pending-fg);
+  background: var(--status-pending-bg);
+}
+
 /* ================= Search input ================= */
 .hrb-search {
   position: relative;
@@ -1375,6 +1380,28 @@ a.hrb-table__title:hover {
   color: var(--status-pending-fg);
   background: var(--status-pending-bg);
   border-bottom: 1px solid var(--color-border);
+}
+
+/* ================= バージョン履歴モーダル ================= */
+.hrb-version-label {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-right: var(--space-2);
+}
+
+.hrb-version-empty {
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: var(--space-6) 0;
+}
+
+.hrb-version-preview__frame {
+  width: 100%;
+  height: min(52vh, 480px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-content-bg);
+  margin-top: var(--space-3);
 }
 
 /* ================= 公開/非公開トグル ================= */

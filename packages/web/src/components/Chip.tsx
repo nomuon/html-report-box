@@ -1,4 +1,4 @@
-import type { ReportKind, ReportStatus } from "@hrb/shared";
+import type { ReportKind, ReportStatus, ScanVerdict } from "@hrb/shared";
 
 export const STATUS_LABELS: Record<ReportStatus, string> = {
   published: "公開中",
@@ -25,4 +25,26 @@ export function StatusChip({ status }: { status: ReportStatus }) {
 
 export function KindChip({ kind }: { kind: ReportKind }) {
   return <span className="hrb-chip hrb-chip--kind">{kind === "html" ? "HTML" : "ZIP"}</span>;
+}
+
+const VERDICT_LABELS: Record<ScanVerdict, string> = {
+  pass: "パス",
+  warn: "注意",
+  block: "拒否",
+};
+
+const VERDICT_CLASS: Record<ScanVerdict, string> = {
+  pass: "hrb-chip--published",
+  warn: "hrb-chip--warn",
+  block: "hrb-chip--rejected",
+};
+
+/** スキャン判定バッジ（バージョン履歴などオーナー/管理者向け画面用）。 */
+export function VerdictChip({ verdict }: { verdict: ScanVerdict }) {
+  return (
+    <span className={`hrb-chip ${VERDICT_CLASS[verdict]}`}>
+      <span className="hrb-chip__dot" aria-hidden="true" />
+      {VERDICT_LABELS[verdict]}
+    </span>
+  );
 }

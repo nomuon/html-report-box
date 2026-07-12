@@ -46,6 +46,21 @@ export const ReportFlagSchema = z.object({
 });
 export type ReportFlag = z.infer<typeof ReportFlagSchema>;
 
+// ---- Version history entry (原本 sources/<id>/v<version> のメタデータ) ----
+export const ReportVersionSchema = z.object({
+  /** ReportMeta.version と同じ単調増加値。 */
+  version: z.number().int().min(1),
+  /**
+   * 取り込み時点の kind。上書きで kind が変わり得るため、rollback は
+   * この値でスキャン・展開する（zip を html として扱う事故を防ぐ）。
+   */
+  kind: ReportKindSchema,
+  createdAt: z.iso.datetime(),
+  sizeBytes: z.number().int().nonnegative(),
+  verdict: ScanVerdictSchema,
+});
+export type ReportVersion = z.infer<typeof ReportVersionSchema>;
+
 // ---- Report id ----
 export const ReportIdSchema = z.string().regex(REPORT_ID_PATTERN, "invalid report id");
 export type ReportId = z.infer<typeof ReportIdSchema>;
@@ -82,6 +97,11 @@ export const ReportMetaSchema = z.object({
   /** Result of the latest security scan. Absent until the first upload completes. */
   verdict: ScanVerdictSchema.optional(),
   findings: z.array(ScanFindingSchema).default([]),
+  /**
+   * 保持中の原本バージョン履歴（古い順、最大 REPORT_VERSION_HISTORY_LIMIT 件）。
+   * versions を持たない既存データは空履歴として扱う（後方互換）。
+   */
+  versions: z.array(ReportVersionSchema).default([]),
   /** Audit trail (never exposed publicly). */
   sourceIp: z.string().optional(),
   userAgent: z.string().optional(),
@@ -94,6 +114,7 @@ export const PublicReportSchema = ReportMetaSchema.omit({
   ownerSub: true,
   verdict: true,
   findings: true,
+  versions: true,
   sourceIp: true,
   userAgent: true,
 });
