@@ -328,6 +328,52 @@ describe("per-user API keys and write tools", () => {
     expect(unpublished.status).toBe("private");
   });
 
+  test("publish_report visibility=unlisted: link-only — get works anonymously, list/search stay empty", async () => {
+    const uploaded = parseToolJson(
+      await callToolWith(wapp, bearer, "upload_report", {
+        title: "リンク限定レポート",
+        html: page("リンク限定レポート", "限定共有の本文です。"),
+      }),
+    );
+
+    const published = parseToolJson(
+      await callToolWith(wapp, bearer, "publish_report", {
+        id: uploaded.id,
+        visibility: "unlisted",
+      }),
+    );
+    expect(published.status).toBe("unlisted");
+    expect(published.contentUrl).toBe(`${CONTENT_BASE}/r/${uploaded.id}/`);
+
+    // 匿名（static key）でも URL 付きで取得できる…
+    const anon = parseToolJson(
+      await callToolWith(wapp, { authorization: `Bearer ${STATIC_KEY}` }, "get_report", {
+        id: uploaded.id,
+      }),
+    );
+    expect(anon.report.status).toBe("unlisted");
+    expect(anon.url).toBe(`${CONTENT_BASE}/r/${uploaded.id}/`);
+
+    // …が、一覧・検索には載らない
+    const listed = parseToolJson(await callToolWith(wapp, bearer, "list_recent_reports", {}));
+    expect(listed.reports.map((r: any) => r.id)).not.toContain(uploaded.id);
+    const searched = parseToolJson(
+      await callToolWith(wapp, bearer, "search_reports", { query: "限定共有" }),
+    );
+    expect(searched.results.map((r: any) => r.id)).not.toContain(uploaded.id);
+
+    // visibility 省略の再呼び出しで published へ切替（後方互換）
+    const republished = parseToolJson(
+      await callToolWith(wapp, bearer, "publish_report", { id: uploaded.id }),
+    );
+    expect(republished.status).toBe("published");
+    const relisted = parseToolJson(await callToolWith(wapp, bearer, "list_recent_reports", {}));
+    expect(relisted.reports.map((r: any) => r.id)).toContain(uploaded.id);
+
+    // 後始末: 他テストの一覧に影響しないよう非公開へ戻す
+    await callToolWith(wapp, bearer, "unpublish_report", { id: uploaded.id });
+  });
+
   test("cannot publish someone else's report (owner check)", async () => {
     const bob = getDevUser("bob");
     const { report, upload } = await wctx.service.create(bob, { title: "bob の下書き", kind: "html" });

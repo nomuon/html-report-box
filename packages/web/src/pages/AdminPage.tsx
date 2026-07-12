@@ -120,7 +120,7 @@ function FlaggedTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
                       <Link to={`/reports/${r.id}`} target="_blank" rel="noreferrer">
                         <Button variant="secondary">プレビュー</Button>
                       </Link>
-                      {r.status === "published" && (
+                      {(r.status === "published" || r.status === "unlisted") && (
                         <Button
                           variant="danger"
                           onClick={() => onConfirm({ kind: "takedown", report: r })}
@@ -246,7 +246,7 @@ function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
                   <td className="hrb-table__date">{formatDateTime(r.updatedAt)}</td>
                   <td>
                     <div className="hrb-row-actions">
-                      {r.status === "published" && (
+                      {(r.status === "published" || r.status === "unlisted") && (
                         <Button
                           variant="danger"
                           onClick={() => onConfirm({ kind: "takedown", report: r })}

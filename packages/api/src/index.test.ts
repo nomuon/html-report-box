@@ -373,6 +373,87 @@ test("non-published report: owner and admin see it, others get 404", async () =>
   expect(mine.json.reports.map((r: any) => r.id)).toContain(id);
 });
 
+test("publish with visibility=unlisted: link-only — anyone can read, never listed or searched", async () => {
+  const env = makeEnv();
+  const { id } = await upload(env, "alice", "Unlisted Numbers");
+
+  const published = await call(env.app, "POST", `/reports/${id}/publish`, {
+    user: "alice",
+    body: { visibility: "unlisted" },
+  });
+  expect(published.status).toBe(200);
+  expect(published.json.report.status).toBe("unlisted");
+  expect(published.json.url).toBe(`${BASE}/r/${id}/`);
+
+  // URL を知っていれば匿名でも閲覧できる（content URL 付き）
+  const anon = await call(env.app, "GET", `/reports/${id}`);
+  expect(anon.status).toBe(200);
+  expect(anon.json.report.status).toBe("unlisted");
+  expect(anon.json.url).toBe(`${BASE}/r/${id}/`);
+
+  // 一覧・検索には載らない
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(0);
+  expect((await call(env.app, "GET", "/search?q=unlisted")).json.results).toHaveLength(0);
+
+  // unlisted でも通報できる
+  const flagged = await call(env.app, "POST", `/reports/${id}/flag`, {
+    body: { reason: "link-only but viewable" },
+    ip: "203.0.113.9",
+  });
+  expect(flagged.status).toBe(200);
+
+  // published への切替（visibility 省略 = published: 後方互換）で一覧・検索に載る
+  const republished = await call(env.app, "POST", `/reports/${id}/publish`, { user: "alice" });
+  expect(republished.status).toBe(200);
+  expect(republished.json.report.status).toBe("published");
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(1);
+  expect(
+    (await call(env.app, "GET", "/search?q=unlisted")).json.results.map((r: any) => r.report.id),
+  ).toContain(id);
+
+  // published → unlisted の再切替で一覧・検索から消える
+  const relisted = await call(env.app, "POST", `/reports/${id}/publish`, {
+    user: "alice",
+    body: { visibility: "unlisted" },
+  });
+  expect(relisted.json.report.status).toBe("unlisted");
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(0);
+  expect((await call(env.app, "GET", "/search?q=unlisted")).json.results).toHaveLength(0);
+
+  // 不正な visibility は validation_failed
+  const invalid = await call(env.app, "POST", `/reports/${id}/publish`, {
+    user: "alice",
+    body: { visibility: "secret" },
+  });
+  expect(invalid.status).toBe(400);
+  expect(invalid.json.error.code).toBe("validation_failed");
+
+  // unpublish で従来どおり private へ
+  const unpublished = await call(env.app, "POST", `/reports/${id}/unpublish`, { user: "alice" });
+  expect(unpublished.json.report.status).toBe("private");
+  expect((await call(env.app, "GET", `/reports/${id}`)).status).toBe(404);
+});
+
+test("admin can filter /admin/reports by status=unlisted and take an unlisted report down", async () => {
+  const env = makeEnv();
+  await uploadPublished(env, "alice", "Listed One");
+  const { id: unlistedId } = await upload(env, "alice", "Unlisted One");
+  await call(env.app, "POST", `/reports/${unlistedId}/publish`, {
+    user: "alice",
+    body: { visibility: "unlisted" },
+  });
+
+  const filtered = await call(env.app, "GET", "/admin/reports?status=unlisted", { user: "admin" });
+  expect(filtered.status).toBe(200);
+  expect(filtered.json.reports.map((r: any) => r.id)).toEqual([unlistedId]);
+
+  const down = await call(env.app, "POST", `/admin/reports/${unlistedId}/takedown`, {
+    user: "admin",
+  });
+  expect(down.status).toBe(200);
+  expect(down.json.report.status).toBe("takedown");
+});
+
 test("GET /reports/:id returns isOwner from the viewer context", async () => {
   const env = makeEnv();
   const { id } = await uploadPublished(env, "alice", "Ownership");

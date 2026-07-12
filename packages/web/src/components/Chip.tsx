@@ -2,6 +2,7 @@ import type { ReportKind, ReportStatus, ScanVerdict } from "@hrb/shared";
 
 export const STATUS_LABELS: Record<ReportStatus, string> = {
   published: "公開中",
+  unlisted: "リンク限定",
   private: "非公開",
   rejected: "拒否",
   takedown: "管理停止",
@@ -9,6 +10,7 @@ export const STATUS_LABELS: Record<ReportStatus, string> = {
 
 const STATUS_CLASS: Record<ReportStatus, string> = {
   published: "hrb-chip--published",
+  unlisted: "hrb-chip--unlisted",
   private: "hrb-chip--private",
   rejected: "hrb-chip--rejected",
   takedown: "hrb-chip--rejected",

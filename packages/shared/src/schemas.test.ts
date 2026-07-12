@@ -83,8 +83,8 @@ describe("ReportMetaSchema", () => {
     expect(ReportMetaSchema.safeParse({ ...validMeta, title: "  " }).success).toBe(false);
   });
 
-  test("all four statuses are accepted", () => {
-    for (const status of ["private", "published", "rejected", "takedown"]) {
+  test("all five statuses are accepted", () => {
+    for (const status of ["private", "published", "unlisted", "rejected", "takedown"]) {
       expect(ReportMetaSchema.safeParse({ ...validMeta, status }).success).toBe(true);
     }
   });

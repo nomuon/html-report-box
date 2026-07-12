@@ -22,6 +22,7 @@ import {
 import type {
   CreateReportRequest,
   PresignedUpload,
+  PublishVisibility,
   ReportKind,
   ReportMeta,
   ReportStatus,
@@ -119,7 +120,7 @@ export class ReportService {
   }
 
   /**
-   * Visibility: published → anyone; otherwise owner or admin only
+   * Visibility: published / unlisted → anyone; otherwise owner or admin only
    * (non-visible reports surface as not_found, never as forbidden).
    */
   async get(
@@ -129,9 +130,9 @@ export class ReportService {
     const meta = await this.repo.get(id);
     if (!meta) throw new DomainError("not_found", "report not found");
     const isOwner = viewer != null && viewer.sub === meta.ownerSub;
-    const visible = meta.status === "published" || isOwner || (viewer?.isAdmin ?? false);
+    const visible = this.isPubliclyServed(meta.status) || isOwner || (viewer?.isAdmin ?? false);
     if (!visible) throw new DomainError("not_found", "report not found");
-    if (meta.status === "published") {
+    if (this.isPubliclyServed(meta.status)) {
       return { report: meta, url: this.contentUrl(id), isOwner };
     }
     return { report: meta, isOwner };
@@ -342,14 +343,24 @@ export class ReportService {
     return result;
   }
 
-  /** Make a private report publicly visible (owner or admin). Idempotent. */
-  async publish(user: AuthUser, id: string): Promise<{ report: ReportMeta; url: string }> {
+  /**
+   * Make a private report publicly viewable (owner or admin). Idempotent.
+   * visibility: published = 一覧・検索に表示 / unlisted = URL を知る人のみ
+   * （一覧・検索インデックスには載せない）。published⇔unlisted の切替も
+   * 再呼び出しで行う（コンテンツは配信済みなのでインデックスだけ遷移）。
+   */
+  async publish(
+    user: AuthUser,
+    id: string,
+    opts?: { visibility?: PublishVisibility },
+  ): Promise<{ report: ReportMeta; url: string }> {
+    const visibility = opts?.visibility ?? "published";
     const meta = await this.mustGet(id);
     this.assertOwnerOrAdmin(user, meta);
     if (meta.status === "takedown" && !user.isAdmin) {
       throw new DomainError("forbidden", "report was taken down by an administrator");
     }
-    if (meta.status === "published") {
+    if (meta.status === visibility) {
       return { report: meta, url: this.contentUrl(id) };
     }
     if (meta.status === "rejected") {
@@ -358,19 +369,36 @@ export class ReportService {
         "report was rejected by the security scan; upload a fixed version first",
       );
     }
+    if (this.isPubliclyServed(meta.status)) {
+      // published ⇔ unlisted: content objects stay as-is; only the search
+      // index membership and META change.
+      meta.status = visibility;
+      meta.updatedAt = this.now().toISOString();
+      if (visibility === "published") {
+        const extracted = await this.storage.getContentObject(
+          `reports/${id}/${EXTRACTED_TEXT_FILENAME}`,
+        );
+        await this.reindex(meta, extracted ? new TextDecoder().decode(extracted) : "");
+      } else {
+        await this.removeFromIndex(id);
+      }
+      await this.repo.update(meta);
+      return { report: meta, url: this.contentUrl(id) };
+    }
     const data = await this.loadSource(meta);
     if (!data) {
       throw new DomainError("conflict", "report has no publishable content; upload it first");
     }
     const { files, extraction } = await this.extractFiles(meta.kind, data);
     meta.updatedAt = this.now().toISOString();
-    await this.writePublic(meta, files, extraction.text);
+    await this.writePublic(meta, files, extraction.text, visibility);
     return { report: meta, url: this.contentUrl(id) };
   }
 
   /**
-   * Hide a published report (owner or admin): removed from list / search /
-   * content origin, but META and the editable source are kept. Idempotent.
+   * Hide a published / unlisted report (owner or admin): removed from list /
+   * search / content origin, but META and the editable source are kept.
+   * Idempotent.
    */
   async unpublish(user: AuthUser, id: string): Promise<ReportMeta> {
     const meta = await this.mustGet(id);
@@ -379,7 +407,7 @@ export class ReportService {
       throw new DomainError("forbidden", "report was taken down by an administrator");
     }
     if (meta.status === "private") return meta;
-    if (meta.status !== "published") {
+    if (!this.isPubliclyServed(meta.status)) {
       throw new DomainError("conflict", `report is ${meta.status}, not published`);
     }
     // Legacy reports: the public copy may be the only remaining bytes —
@@ -563,7 +591,8 @@ export class ReportService {
 
   async flag(id: string, reason: string, audit?: AuditInfo): Promise<void> {
     const meta = await this.repo.get(id);
-    if (!meta || meta.status !== "published") {
+    // unlisted も URL を知っていれば閲覧できるため通報対象。
+    if (!meta || !this.isPubliclyServed(meta.status)) {
       throw new DomainError("not_found", "report not found");
     }
     const flag: ReportFlag = {
@@ -639,6 +668,11 @@ export class ReportService {
   // =====================
   // Internals
   // =====================
+
+  /** published / unlisted — content is served to anyone who has the URL. */
+  private isPubliclyServed(status: ReportStatus): status is PublishVisibility {
+    return status === "published" || status === "unlisted";
+  }
 
   private async mustGet(id: string): Promise<ReportMeta> {
     const meta = await this.repo.get(id);
@@ -798,8 +832,9 @@ export class ReportService {
       await this.storage.deleteContentObject(this.versionKey(id, oldest.version));
     }
 
-    if (meta.status === "published") {
-      await this.writePublic(next, files, extraction.text);
+    if (this.isPubliclyServed(meta.status)) {
+      // 公開中（published / unlisted）の上書きは同じ公開範囲のまま再公開する。
+      await this.writePublic(next, files, extraction.text, meta.status);
       return { report: next, url: this.contentUrl(id) };
     }
     next.status = "private";
@@ -836,13 +871,15 @@ export class ReportService {
   }
 
   /**
-   * Write content objects + extracted text, rebuild the search index and mark
-   * the report published. Mutates `meta` and persists it.
+   * Write content objects + extracted text and mark the report published or
+   * unlisted. The search index is only rebuilt for published — unlisted is
+   * never indexed (removed if it was). Mutates `meta` and persists it.
    */
   private async writePublic(
     meta: ReportMeta,
     files: Array<{ path: string; data: Uint8Array }>,
     bodyText: string,
+    visibility: PublishVisibility = "published",
   ): Promise<void> {
     const id = meta.id;
     for (const file of files) {
@@ -857,8 +894,12 @@ export class ReportService {
       new TextEncoder().encode(bodyText),
       "text/plain; charset=utf-8",
     );
-    meta.status = "published";
-    await this.reindex(meta, bodyText);
+    meta.status = visibility;
+    if (visibility === "published") {
+      await this.reindex(meta, bodyText);
+    } else {
+      await this.removeFromIndex(id);
+    }
     await this.repo.update(meta);
     await this.cdn.invalidate([`/r/${id}/*`]);
   }

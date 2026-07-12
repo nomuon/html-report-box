@@ -450,6 +450,11 @@
   background: var(--status-published-bg);
 }
 
+.hrb-chip--unlisted {
+  color: var(--color-primary);
+  background: var(--color-primary-subtle);
+}
+
 .hrb-chip--private {
   color: var(--color-text-muted);
   background: var(--color-surface-2);
@@ -1469,6 +1474,71 @@ a.hrb-table__title:hover {
 .hrb-switch:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 2px;
+}
+
+/* 公開範囲の変更ボタン（公開中のみ表示） */
+.hrb-visibility-edit {
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--color-primary);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.hrb-visibility-edit:hover {
+  background: var(--color-primary-subtle);
+}
+
+.hrb-visibility-edit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 公開確認モーダルの公開範囲ラジオ */
+.hrb-visibility-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.hrb-visibility-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.hrb-visibility-option--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-subtle);
+}
+
+.hrb-visibility-option input {
+  margin-top: 3px;
+  accent-color: var(--color-primary);
+}
+
+.hrb-visibility-option__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.hrb-visibility-option__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.hrb-visibility-option__detail {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 
 /* ================= HTML エディタモーダル ================= */

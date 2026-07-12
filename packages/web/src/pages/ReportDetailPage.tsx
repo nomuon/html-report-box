@@ -126,7 +126,8 @@ export function ReportDetailPage() {
   }
 
   const shareUrl = `${location.origin}/reports/${report.id}`;
-  const published = report.status === "published";
+  // published / unlisted — URL を知っていれば誰でも閲覧できる状態
+  const published = report.status === "published" || report.status === "unlisted";
 
   const emptyDetail =
     report.status === "rejected"
@@ -157,7 +158,7 @@ export function ReportDetailPage() {
         <div className="hrb-detail__actions">
           {canEdit && (
             <>
-              {report.status === "published" || report.status === "private" ? (
+              {report.status === "published" || report.status === "unlisted" || report.status === "private" ? (
                 <PublishToggle report={report} />
               ) : (
                 <StatusChip status={report.status} />

@@ -7,13 +7,15 @@ import { REPORT_ID_PATTERN } from "./constants.ts";
 // ---- Enums ----
 /**
  * Lifecycle:
- *   private   — exists but unlisted; owner/admin only (initial state, user can
+ *   private   — exists but hidden; owner/admin only (initial state, user can
  *               publish/unpublish freely)
  *   published — publicly listed, indexed and served
+ *   unlisted  — served like published, but never listed or indexed
+ *               (link-only sharing; anyone with the URL can view)
  *   rejected  — latest upload was blocked by the security scan
  *   takedown  — force-unpublished by an administrator
  */
-export const REPORT_STATUSES = ["private", "published", "rejected", "takedown"] as const;
+export const REPORT_STATUSES = ["private", "published", "unlisted", "rejected", "takedown"] as const;
 export const ReportStatusSchema = z.enum(REPORT_STATUSES);
 export type ReportStatus = z.infer<typeof ReportStatusSchema>;
 

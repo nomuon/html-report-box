@@ -28,6 +28,7 @@ import {
   MAX_ZIP_SIZE_BYTES,
   MAX_ZIP_UNCOMPRESSED_BYTES,
   PaginationQuerySchema,
+  PublishReportRequestSchema,
   RollbackReportRequestSchema,
   SearchQuerySchema,
   UpdateReportContentRequestSchema,
@@ -36,7 +37,7 @@ import {
   toOwnedReport,
   toPublicReport,
 } from "@hrb/shared";
-import type { GetConfigResponse } from "@hrb/shared";
+import type { GetConfigResponse, PublishVisibility } from "@hrb/shared";
 import { DomainError, isDomainError } from "@hrb/core";
 import type { ApiKeyStore, AuthUser, AuthVerifier, PageOptions, ReportService, SessionAuth, UserAdmin } from "@hrb/core";
 import { createMemoryRateLimiter } from "./rate-limit.ts";
@@ -336,7 +337,21 @@ export function createApp(ctx: AppContext): AppType {
   });
 
   app.post("/reports/:id/publish", requireAuth, async (c) => {
-    const { report, url } = await ctx.service.publish(mustUser(c), c.req.param("id"));
+    // body は省略可（後方互換）: 省略時は visibility=published
+    const raw = await c.req.text();
+    let visibility: PublishVisibility = "published";
+    if (raw.trim().length > 0) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new DomainError("bad_request", "request body must be valid JSON");
+      }
+      visibility = parseWith(PublishReportRequestSchema, parsed, "publish").visibility;
+    }
+    const { report, url } = await ctx.service.publish(mustUser(c), c.req.param("id"), {
+      visibility,
+    });
     return c.json({ report: toOwnedReport(report), url });
   });
 

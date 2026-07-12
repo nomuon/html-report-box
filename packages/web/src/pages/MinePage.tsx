@@ -88,7 +88,7 @@ export function MinePage() {
                   </td>
                   <td>
                     <span className="hrb-status-cell">
-                      {r.status === "published" || r.status === "private" ? (
+                      {r.status === "published" || r.status === "unlisted" || r.status === "private" ? (
                         <PublishToggle report={r} />
                       ) : (
                         <StatusChip status={r.status} />

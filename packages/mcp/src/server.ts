@@ -137,8 +137,8 @@ export function buildMcpServer(ctx: McpContext, auth: McpAuth = { user: null }):
         const truncated = fullText.length > MAX_EXTRACTED_TEXT_CHARS;
         return jsonResult({
           report: toPublicReport(report),
-          // Content URL only exists while published (private reports are not served).
-          ...(report.status === "published"
+          // Content URL only exists while served (published / unlisted).
+          ...(report.status === "published" || report.status === "unlisted"
             ? { url: url ?? reportService.contentUrl(id) }
             : {}),
           appUrl: appUrl(id),
@@ -222,15 +222,27 @@ export function buildMcpServer(ctx: McpContext, auth: McpAuth = { user: null }):
       title: "Publish report",
       description:
         "Make one of your private reports publicly visible (requires a " +
-        "per-user API key; owner only). Returns the share URL.",
+        "per-user API key; owner only). visibility 'published' lists the " +
+        "report in the public list and search; 'unlisted' serves it only to " +
+        "people who know the URL. Call again to switch between the two. " +
+        "Returns the share URL.",
       inputSchema: {
         id: z.string().min(1).describe("Report id (from upload_report / get_report)"),
+        visibility: z
+          .enum(["published", "unlisted"])
+          .optional()
+          .describe(
+            "'published' = listed and searchable (default); " +
+              "'unlisted' = link-only, never listed or searchable",
+          ),
       },
     },
-    async ({ id }) =>
+    async ({ id, visibility }) =>
       runTool(async () => {
         const owner = mustUser();
-        const { report, url } = await reportService.publish(owner, id);
+        const { report, url } = await reportService.publish(owner, id, {
+          ...(visibility !== undefined ? { visibility } : {}),
+        });
         return jsonResult({
           id: report.id,
           status: report.status,

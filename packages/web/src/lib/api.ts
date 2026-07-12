@@ -31,6 +31,7 @@ import type {
   ListReportVersionsResponse,
   MyReportsResponse,
   PublishReportResponse,
+  PublishVisibility,
   ReportKind,
   ReportStatus,
   RollbackReportResponse,
@@ -181,8 +182,11 @@ export class ApiClient {
     return this.request("PATCH", `/reports/${encodeURIComponent(id)}`, { body: patch });
   }
 
-  publishReport(id: string): Promise<PublishReportResponse> {
-    return this.request("POST", `/reports/${encodeURIComponent(id)}/publish`);
+  /** 公開（visibility 省略時は published）。published⇔unlisted の切替も再呼び出しで行う。 */
+  publishReport(id: string, visibility: PublishVisibility = "published"): Promise<PublishReportResponse> {
+    return this.request("POST", `/reports/${encodeURIComponent(id)}/publish`, {
+      body: { visibility },
+    });
   }
 
   unpublishReport(id: string): Promise<UnpublishReportResponse> {

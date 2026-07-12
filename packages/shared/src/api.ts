@@ -209,7 +209,7 @@ export const GetReportResponseSchema = z.object({
   report: PublicReportSchema,
   /** True when the requesting viewer owns this report (false for anonymous / others / admin). */
   isOwner: z.boolean(),
-  /** Content URL, e.g. https://content.example.com/r/<id>/ (absent unless published). */
+  /** Content URL, e.g. https://content.example.com/r/<id>/ (absent unless published / unlisted). */
   url: z.string().optional(),
   /** Latest scan outcome — owner/admin viewers only (never exposed publicly). */
   verdict: ScanVerdictSchema.optional(),
@@ -303,8 +303,19 @@ export const UpdateReportResponseSchema = z.object({
 export type UpdateReportResponse = z.infer<typeof UpdateReportResponseSchema>;
 
 // =====================
-// POST /reports/:id/publish (auth, owner or admin) — private → published
+// POST /reports/:id/publish (auth, owner or admin) — private → published / unlisted
+// (published⇔unlisted の切替も再呼び出しで可能。body 省略時は published)
 // =====================
+/** 公開範囲: published = 一覧・検索に表示 / unlisted = URL を知る人のみ。 */
+export const PUBLISH_VISIBILITIES = ["published", "unlisted"] as const;
+export const PublishVisibilitySchema = z.enum(PUBLISH_VISIBILITIES);
+export type PublishVisibility = z.infer<typeof PublishVisibilitySchema>;
+
+export const PublishReportRequestSchema = z.object({
+  visibility: PublishVisibilitySchema.default("published"),
+});
+export type PublishReportRequest = z.infer<typeof PublishReportRequestSchema>;
+
 export const PublishReportResponseSchema = z.object({
   report: OwnedReportSchema,
   /** Content URL of the now-published report. */
@@ -313,7 +324,7 @@ export const PublishReportResponseSchema = z.object({
 export type PublishReportResponse = z.infer<typeof PublishReportResponseSchema>;
 
 // =====================
-// POST /reports/:id/unpublish (auth, owner or admin) — published → private
+// POST /reports/:id/unpublish (auth, owner or admin) — published / unlisted → private
 // =====================
 export const UnpublishReportResponseSchema = z.object({
   report: OwnedReportSchema,

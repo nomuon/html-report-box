@@ -235,6 +235,90 @@ describe("report lifecycle", () => {
   });
 });
 
+describe("unlisted (リンク限定共有)", () => {
+  test("publish visibility=unlisted: anyone can get it, but never listed or searchable", async () => {
+    const { report } = await upload(
+      alice,
+      { title: "限定共有レポート" },
+      html("限定", "<p>リンク限定の本文。</p>"),
+    );
+    const res = await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+    expect(res.report.status).toBe("unlisted");
+    expect(res.url).toBe(`http://localhost:3000/r/${report.id}/`);
+
+    // URL を知っていれば匿名でも閲覧できる（content URL 付き）
+    const anon = await ctx.service.get(report.id);
+    expect(anon.report.status).toBe("unlisted");
+    expect(anon.url).toBe(`http://localhost:3000/r/${report.id}/`);
+    expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).not.toBeNull();
+
+    // 一覧・検索には絶対に載らない
+    expect((await ctx.service.listPublished()).items).toHaveLength(0);
+    expect((await ctx.service.search("限定共有レポート")).results).toHaveLength(0);
+  });
+
+  test("published⇔unlisted の切替で検索インデックスが正しく遷移する", async () => {
+    const { report } = await uploadPublished(
+      alice,
+      { title: "切替レポート" },
+      html("s", "<p>切替の本文。</p>"),
+    );
+    expect((await ctx.service.search("切替")).results).toHaveLength(1);
+
+    // published → unlisted: 一覧・検索から消えるが配信は継続
+    const un = await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+    expect(un.report.status).toBe("unlisted");
+    expect((await ctx.service.search("切替")).results).toHaveLength(0);
+    expect((await ctx.service.listPublished()).items).toHaveLength(0);
+    expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).not.toBeNull();
+
+    // unlisted → published（visibility 省略 = published: 後方互換）
+    const re = await ctx.service.publish(alice, report.id);
+    expect(re.report.status).toBe("published");
+    expect((await ctx.service.search("切替")).results).toHaveLength(1);
+    expect((await ctx.service.listPublished()).items).toHaveLength(1);
+
+    // 同一 visibility の再呼び出しは冪等
+    const again = await ctx.service.publish(alice, report.id, { visibility: "published" });
+    expect(again.report.status).toBe("published");
+  });
+
+  test("unlisted の上書きは unlisted のまま、インデックスにも載らない", async () => {
+    const { report } = await upload(alice, { title: "限定上書き" }, html("v1", "<p>初版。</p>"));
+    await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+
+    const { upload: up2 } = await ctx.service.issueUploadUrl(alice, report.id, "html");
+    await ctx.storage.putStagingObject(up2.key, enc.encode(html("v2", "<p>改訂版の本文。</p>")));
+    const second = await ctx.service.complete(alice, report.id, up2.key);
+    expect(second.report.status).toBe("unlisted");
+    expect(second.url).toBeDefined();
+    expect((await ctx.service.search("改訂版")).results).toHaveLength(0);
+    expect((await ctx.service.listPublished()).items).toHaveLength(0);
+  });
+
+  test("unpublish で private に戻る（匿名は不可視に）", async () => {
+    const { report } = await upload(alice, { title: "限定解除" }, html("u", "<p>本文。</p>"));
+    await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+
+    const back = await ctx.service.unpublish(alice, report.id);
+    expect(back.status).toBe("private");
+    await expectDomainError(ctx.service.get(report.id), "not_found");
+    expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
+  });
+
+  test("unlisted でも通報でき、テイクダウンも適用できる", async () => {
+    const { report } = await upload(alice, { title: "限定通報" }, html("f", "<p>本文。</p>"));
+    await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+
+    await ctx.service.flag(report.id, "リンク限定でも閲覧できるため通報");
+    expect(await ctx.service.adminListFlags(admin, report.id)).toHaveLength(1);
+
+    const down = await ctx.service.adminTakedown(admin, report.id);
+    expect(down.status).toBe("takedown");
+    expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
+  });
+});
+
 describe("direct HTML edit", () => {
   test("editContent re-scans, bumps version and updates published content in place", async () => {
     const { report } = await uploadPublished(alice, { title: "編集対象" }, html("v1", "初版の本文"));
