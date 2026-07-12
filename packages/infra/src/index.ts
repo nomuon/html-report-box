@@ -5,7 +5,7 @@
 export const PACKAGE_NAME = "@hrb/infra";
 
 export { loadConfig, type HrbInfraConfig } from "./config.ts";
-export { buildContentCsp, CONTENT_X_ROBOTS_TAG } from "./content-csp.ts";
+export { buildContentCsp, CONTENT_X_ROBOTS_TAG } from "@hrb/shared";
 export { resolveBundledCode, PLACEHOLDER_HANDLER_CODE } from "./lambda-code.ts";
 export { HrbEdgeStack, type HrbEdgeStackProps } from "./stacks/edge-stack.ts";
 export {

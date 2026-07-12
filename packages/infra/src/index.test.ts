@@ -10,7 +10,7 @@ import { describe, expect, test } from "bun:test";
 import { App, aws_lambda as lambda } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import type { HrbInfraConfig } from "./config.ts";
-import { buildContentCsp, CONTENT_X_ROBOTS_TAG } from "./content-csp.ts";
+import { buildContentCsp, CONTENT_X_ROBOTS_TAG } from "@hrb/shared";
 import { PLACEHOLDER_HANDLER_CODE } from "./lambda-code.ts";
 import { PACKAGE_NAME } from "./index.ts";
 import { HrbAppStack } from "./stacks/app-stack.ts";

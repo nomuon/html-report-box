@@ -26,7 +26,7 @@ import {
 } from "aws-cdk-lib";
 import type { Construct } from "constructs";
 import type { HrbInfraConfig } from "../config.ts";
-import { buildContentCsp, CONTENT_X_ROBOTS_TAG } from "../content-csp.ts";
+import { buildContentCsp, CONTENT_X_ROBOTS_TAG } from "@hrb/shared";
 import { CONTENT_BASE_URL_PARAM, CONTENT_DISTRIBUTION_ID_PARAM } from "./app-stack.ts";
 
 export interface HrbCdnStackProps extends StackProps {

@@ -1,15 +1,16 @@
 /**
- * CSP + security headers for the content distribution (Distribution B, /r/*).
+ * CSP + security headers for the content distribution (/r/*).
  *
  * Policy (per security plan): allow uploaded reports to run their own JS and
  * pull from the 4 allow-listed CDNs + Google Fonts, but block exfiltration
  * (connect-src 'self'), phishing form posts (form-action 'self'), framing of
  * third parties (frame-src 'none') and plugin content. No 'unsafe-eval'.
  *
- * Derived from @hrb/shared constants so the scanner allowlist and the CSP can
- * never drift apart.
+ * shared に置く理由: CloudFront（packages/infra）とローカル/VPS サーバー
+ * （packages/api/src/local）が同一ポリシーを配信し、scanner の allowlist と
+ * CSP がドリフトしないようにするため。
  */
-import { ALLOWED_CDN_HOSTS } from "@hrb/shared";
+import { ALLOWED_CDN_HOSTS } from "./constants.ts";
 
 const GOOGLE_FONTS_CSS_HOST = "fonts.googleapis.com";
 const GOOGLE_FONTS_FONT_HOST = "fonts.gstatic.com";
