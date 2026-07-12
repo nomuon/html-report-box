@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { OwnedReport, ScanFinding } from "@hrb/shared";
 import { useApp } from "../app-context.tsx";
 import { isApiError } from "../lib/api.ts";
-import { uploadToPresigned } from "../lib/upload.ts";
+import { UploadAbortedError, uploadToPresigned } from "../lib/upload.ts";
 import { DROPZONE_INITIAL, dropzoneReducer, validateFiles } from "../state/dropzone.ts";
 import { Button } from "./Button.tsx";
 import { DropZone } from "./DropZone.tsx";
@@ -290,6 +290,7 @@ export function OverwriteReportModal({
   const invalidate = useInvalidateReports();
   const [state, dispatch] = useReducer(dropzoneReducer, DROPZONE_INITIAL);
   const fileRef = useRef<File | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const close = () => {
     dispatch({ type: "RESET" });
@@ -311,10 +312,15 @@ export function OverwriteReportModal({
     fileRef.current = files[0] ?? null;
     dispatch({ type: "FILE_ACCEPTED", file: result.file });
     dispatch({ type: "UPLOAD_START" });
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const { upload } = await api.createUploadUrl(report.id, result.file.kind);
-      await uploadToPresigned(upload, fileRef.current!, (percent) =>
-        dispatch({ type: "PROGRESS", percent }),
+      await uploadToPresigned(
+        upload,
+        fileRef.current!,
+        (percent) => dispatch({ type: "PROGRESS", percent }),
+        controller.signal,
       );
       dispatch({ type: "UPLOADED" });
       const completed = await api.completeReport(report.id, upload.key);
@@ -328,12 +334,20 @@ export function OverwriteReportModal({
         toast.push("success", "レポートを上書きしました");
       }
     } catch (err) {
+      if (err instanceof UploadAbortedError) {
+        // 上書きのキャンセル: 既存レポートには手を付けず idle に戻すだけ
+        dispatch({ type: "RESET" });
+        toast.push("info", "アップロードをキャンセルしました");
+        return;
+      }
       dispatch({ type: "FAIL" });
       if (isApiError(err) && err.code !== "network" && err.code !== "internal") {
         toast.push("danger", err.message);
       } else {
         toast.push("danger", "アップロード処理に失敗しました。時間をおいて再試行してください");
       }
+    } finally {
+      abortRef.current = null;
     }
   };
 
@@ -404,6 +418,7 @@ export function OverwriteReportModal({
         state={state}
         dispatch={dispatch}
         onFiles={(f) => void handleFiles(f)}
+        onCancelUpload={() => abortRef.current?.abort()}
         resultContent={resultContent}
       />
       <p className="hrb-upload-note">上書きすると再スキャンが実行されます</p>

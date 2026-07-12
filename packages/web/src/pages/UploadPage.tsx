@@ -12,7 +12,7 @@ import { LoginModal } from "../components/Header.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { extractHtmlTitle, titleFromFilename } from "../lib/html-title.ts";
-import { uploadToPresigned } from "../lib/upload.ts";
+import { UploadAbortedError, uploadToPresigned } from "../lib/upload.ts";
 import { isApiError } from "../lib/api.ts";
 import { DROPZONE_INITIAL, dropzoneReducer, validateFiles } from "../state/dropzone.ts";
 
@@ -45,6 +45,7 @@ export function UploadPage() {
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const fileRef = useRef<File | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   if (!session) {
     return (
@@ -89,14 +90,22 @@ export function UploadPage() {
     if (state.phase !== "selected" || !fileRef.current || !title.trim()) return;
     setBusy(true);
     dispatch({ type: "UPLOAD_START" });
+    const controller = new AbortController();
+    abortRef.current = controller;
+    // キャンセル時の掃除用: create 済みで complete 前の META の id
+    let createdId: string | null = null;
     try {
       const created = await api.createReport({
         title: title.trim(),
         description: description.trim(),
         kind: state.file.kind,
       });
-      await uploadToPresigned(created.upload, fileRef.current, (percent) =>
-        dispatch({ type: "PROGRESS", percent }),
+      createdId = created.report.id;
+      await uploadToPresigned(
+        created.upload,
+        fileRef.current,
+        (percent) => dispatch({ type: "PROGRESS", percent }),
+        controller.signal,
       );
       dispatch({ type: "UPLOADED" });
       const completed = await api.completeReport(created.report.id, created.upload.key);
@@ -108,6 +117,13 @@ export function UploadPage() {
       void queryClient.invalidateQueries({ queryKey: ["reports"] });
       void queryClient.invalidateQueries({ queryKey: ["my-reports"] });
     } catch (err) {
+      if (err instanceof UploadAbortedError) {
+        dispatch({ type: "CANCEL_UPLOAD" });
+        toast.push("info", "アップロードをキャンセルしました");
+        // 未 complete の META は無害だが、消せるなら消す（失敗は無視）
+        if (createdId) void api.deleteReport(createdId).catch(() => {});
+        return;
+      }
       dispatch({ type: "FAIL" });
       if (isApiError(err) && err.code !== "network" && err.code !== "internal") {
         toast.push("danger", err.message);
@@ -115,6 +131,7 @@ export function UploadPage() {
         toast.push("danger", "アップロード処理に失敗しました。時間をおいて再試行してください");
       }
     } finally {
+      abortRef.current = null;
       setBusy(false);
     }
   };
@@ -215,7 +232,13 @@ export function UploadPage() {
       <h1 className="hrb-page__title">レポートをアップロード</h1>
 
       <div className="hrb-upload-zone">
-        <DropZone state={state} dispatch={dispatch} onFiles={(f) => void handleFiles(f)} resultContent={resultContent} />
+        <DropZone
+          state={state}
+          dispatch={dispatch}
+          onFiles={(f) => void handleFiles(f)}
+          onCancelUpload={() => abortRef.current?.abort()}
+          resultContent={resultContent}
+        />
         <p className="hrb-upload-note">
           <Icon name="shield-check" size={14} />
           対応形式: HTML（単一ファイル, 最大 5MB）/ ZIP（index.html 必須, 最大 20MB）· すべてのファイルは公開前にセキュリティスキャンされます

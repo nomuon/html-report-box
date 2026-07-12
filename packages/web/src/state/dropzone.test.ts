@@ -74,6 +74,15 @@ describe("dropzoneReducer", () => {
     expect(s).toEqual({ phase: "rejected", findings });
   });
 
+  test("CANCEL_UPLOAD returns uploading to selected (file kept); ignored elsewhere", () => {
+    const s = run([{ type: "CANCEL_UPLOAD" }], { phase: "uploading", file, percent: 40 });
+    expect(s).toEqual({ phase: "selected", file });
+    // scanning 以降（complete 呼び出し後）はキャンセル不可
+    const scanning: DropzoneState = { phase: "scanning", file };
+    expect(run([{ type: "CANCEL_UPLOAD" }], scanning)).toEqual(scanning);
+    expect(run([{ type: "CANCEL_UPLOAD" }])).toEqual(DROPZONE_INITIAL);
+  });
+
   test("FAIL during upload/scanning returns to idle; RESET always resets", () => {
     expect(run([{ type: "FAIL" }], { phase: "uploading", file, percent: 4 }).phase).toBe("idle");
     expect(run([{ type: "FAIL" }], { phase: "scanning", file }).phase).toBe("idle");
