@@ -13,6 +13,7 @@ export type IconName =
   | "inbox"
   | "moon"
   | "sun"
+  | "monitor"
   | "rows"
   | "grid"
   | "link"
@@ -84,6 +85,13 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <circle cx="12" cy="12" r="4.2" />
       <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5 5l1.6 1.6M17.4 17.4 19 19M5 19l1.6-1.6M17.4 6.6 19 5" />
+    </>
+  ),
+  monitor: (
+    <>
+      <rect x="3" y="4.5" width="18" height="12.5" rx="1.8" />
+      <path d="M12 17v3.5" />
+      <path d="M8.5 20.5h7" />
     </>
   ),
   rows: (

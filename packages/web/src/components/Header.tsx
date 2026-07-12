@@ -2,8 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { useApp, useSession } from "../app-context.tsx";
 import { DevAuthProvider, GoogleAuthProvider } from "../lib/auth.ts";
-import { applyTheme, getEffectiveTheme, nextTheme } from "../lib/theme.ts";
-import type { Theme } from "../lib/theme.ts";
+import {
+  applyThemePreference,
+  getThemePreference,
+  nextPreference,
+  systemPrefersDark,
+  watchSystemTheme,
+} from "../lib/theme.ts";
+import type { ThemePreference } from "../lib/theme.ts";
 import { Button } from "./Button.tsx";
 import { GoogleSignInButton } from "./GoogleSignInButton.tsx";
 import { BrandMark, Icon } from "./Icon.tsx";
@@ -77,7 +83,8 @@ export function Header() {
   const navigate = useNavigate();
   const location = useLocation();
   const [params] = useSearchParams();
-  const [theme, setTheme] = useState<Theme>(() => getEffectiveTheme());
+  const [themePref, setThemePref] = useState<ThemePreference>(() => getThemePreference());
+  const [systemDark, setSystemDark] = useState(() => systemPrefersDark());
   const [menuOpen, setMenuOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -93,11 +100,21 @@ export function Header() {
     return () => window.removeEventListener("mousedown", onDown);
   }, [menuOpen]);
 
-  const toggleTheme = () => {
-    const next = nextTheme(theme);
-    setTheme(next);
-    applyTheme(next);
+  // system 追従中の OS テーマ変化を即時反映（CSS はメディアクエリで追従、ラベル表示を同期）
+  useEffect(() => watchSystemTheme(setSystemDark), []);
+
+  const cycleTheme = () => {
+    const next = nextPreference(themePref);
+    setThemePref(next);
+    applyThemePreference(next);
   };
+
+  const themeLabel =
+    themePref === "system"
+      ? `テーマ: システム設定に追従（現在: ${systemDark ? "ダーク" : "ライト"}）`
+      : themePref === "light"
+        ? "テーマ: ライト"
+        : "テーマ: ダーク";
 
   const devAuth = auth instanceof DevAuthProvider ? auth : null;
 
@@ -130,10 +147,14 @@ export function Header() {
           <button
             type="button"
             className="hrb-icon-btn"
-            aria-label="テーマ切り替え"
-            onClick={toggleTheme}
+            aria-label={themeLabel}
+            title={themeLabel}
+            onClick={cycleTheme}
           >
-            <Icon name={theme === "light" ? "moon" : "sun"} size={18} />
+            <Icon
+              name={themePref === "system" ? "monitor" : themePref === "light" ? "sun" : "moon"}
+              size={18}
+            />
           </button>
 
           {session ? (
