@@ -66,6 +66,11 @@ export interface GoogleAuthOptions {
   adminEmails?: string[];
   /** Replace the Google verification (tests). Defaults to jose + Google JWKS. */
   verifyIdToken?: GoogleIdTokenVerifier;
+  /**
+   * x-dev-user ヘッダーによるフォールバックを許すか（default: true）。
+   * dev の curl/smoke 利便のための機能なので、vps（本番）では必ず false。
+   */
+  allowDevHeader?: boolean;
   now?: () => Date;
 }
 
@@ -73,6 +78,7 @@ export class GoogleAuthVerifier implements AuthVerifier, SessionAuth {
   private readonly clientId: string;
   private readonly adminEmails: Set<string>;
   private readonly verifyIdToken: GoogleIdTokenVerifier;
+  private readonly allowDevHeader: boolean;
   private readonly now: () => Date;
   private readonly store: JsonStore<GoogleAuthState>;
 
@@ -80,6 +86,7 @@ export class GoogleAuthVerifier implements AuthVerifier, SessionAuth {
     this.clientId = options.clientId;
     this.adminEmails = new Set((options.adminEmails ?? []).map((e) => e.toLowerCase()));
     this.verifyIdToken = options.verifyIdToken ?? createGoogleIdTokenVerifier(options.clientId);
+    this.allowDevHeader = options.allowDevHeader ?? true;
     this.now = options.now ?? (() => new Date());
     this.store = new JsonStore(join(options.dataDir, "google-auth.json"), () => ({
       users: {},
@@ -141,12 +148,14 @@ export class GoogleAuthVerifier implements AuthVerifier, SessionAuth {
       }
       return null;
     }
-    // Local convenience: the dev header keeps seed/smoke/curl flows working
-    // even in google mode. Never reachable in a deployed environment.
-    const devName = headers[DEV_USER_HEADER];
-    if (devName) {
-      const user = DEV_USERS[devName.toLowerCase()];
-      if (user) return { ...user };
+    // Local convenience: the dev header keeps smoke/curl flows working even in
+    // google mode. vps (production) disables this via allowDevHeader=false.
+    if (this.allowDevHeader) {
+      const devName = headers[DEV_USER_HEADER];
+      if (devName) {
+        const user = DEV_USERS[devName.toLowerCase()];
+        if (user) return { ...user };
+      }
     }
     return null;
   }

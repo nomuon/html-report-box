@@ -45,6 +45,8 @@ export interface LocalContextOptions {
     clientId: string;
     adminEmails?: string[];
     verifyIdToken?: GoogleIdTokenVerifier;
+    /** x-dev-user フォールバックの許可（default: true。vps では false にする）。 */
+    allowDevHeader?: boolean;
   };
 }
 

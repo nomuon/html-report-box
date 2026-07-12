@@ -19,6 +19,7 @@ afterAll(() => {
 function makeVerifier(opts: {
   payloads?: Record<string, GoogleIdTokenPayload>;
   adminEmails?: string[];
+  allowDevHeader?: boolean;
   now?: () => Date;
   dataDir?: string;
 } = {}) {
@@ -28,6 +29,7 @@ function makeVerifier(opts: {
     clientId: "test-client-id",
     dataDir,
     ...(opts.adminEmails ? { adminEmails: opts.adminEmails } : {}),
+    ...(opts.allowDevHeader !== undefined ? { allowDevHeader: opts.allowDevHeader } : {}),
     ...(opts.now ? { now: opts.now } : {}),
     verifyIdToken: async (credential) => {
       const payload = opts.payloads?.[credential];
@@ -122,6 +124,11 @@ describe("GoogleAuthVerifier.verify", () => {
     const { verifier } = makeVerifier();
     const user = await verifier.verify({ "x-dev-user": "admin" });
     expect(user).toEqual({ sub: "dev-admin", name: "Admin", isAdmin: true });
+  });
+
+  test("allowDevHeader=false（vps）では dev header を無視する", async () => {
+    const { verifier } = makeVerifier({ allowDevHeader: false });
+    expect(await verifier.verify({ "x-dev-user": "admin" })).toBeNull();
   });
 
   test("authConfig advertises google mode with the client id", () => {

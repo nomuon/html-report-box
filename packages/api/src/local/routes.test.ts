@@ -86,6 +86,29 @@ describe("handleLocalUpload", () => {
   });
 });
 
+describe("MCP API キー（server.ts と同じ配線を検証）", () => {
+  test("キー設定時は Bearer なし 401 / 一致で 200", async () => {
+    const { Hono } = await import("hono");
+    const { bearerApiKeyAuth } = await import("@hrb/mcp");
+    const apiKey = "k".repeat(32);
+    const mcpRoot = new Hono();
+    mcpRoot.use("/mcp", bearerApiKeyAuth(apiKey));
+    mcpRoot.all("/mcp", (c) => c.json({ ok: true }));
+    const { handlers } = makeHandlers({ mcp: mcpRoot });
+    const denied = await handlers.handleMcp(
+      new Request("http://app.local/mcp", { method: "POST" }),
+    );
+    expect(denied.status).toBe(401);
+    const allowed = await handlers.handleMcp(
+      new Request("http://app.local/mcp", {
+        method: "POST",
+        headers: { authorization: `Bearer ${apiKey}` },
+      }),
+    );
+    expect(allowed.status).toBe(200);
+  });
+});
+
 describe("CORS の有効/無効", () => {
   test("corsEnabled=true（dev）: API レスポンスと OPTIONS に CORS ヘッダ", async () => {
     const { handlers } = makeHandlers({ corsEnabled: true });

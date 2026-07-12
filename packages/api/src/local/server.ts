@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { createLocalContext, StubDomainReputation } from "@hrb/core/local";
 import { createScanner, createZipExtractor } from "@hrb/scanner";
-import { createMcpApp } from "@hrb/mcp";
+import { bearerApiKeyAuth, createMcpApp } from "@hrb/mcp";
 import { createApp } from "../app.ts";
 import { createRouteHandlers } from "./routes.ts";
 import { resolveServerConfig } from "./server-config.ts";
@@ -35,6 +35,7 @@ const ctx = createLocalContext({
         googleAuth: {
           clientId: config.googleAuth.clientId,
           adminEmails: config.googleAuth.adminEmails,
+          allowDevHeader: config.allowDevUserHeader,
         },
       }
     : {}),
@@ -48,6 +49,8 @@ const app = createApp({
 });
 
 const mcpRoot = new Hono();
+// vps では MCP_API_KEY 必須（server-config が担保）。dev もキー設定時のみ認証。
+mcpRoot.use("/mcp", bearerApiKeyAuth(config.mcpApiKey ?? undefined));
 mcpRoot.route("/mcp", createMcpApp({ reportService: ctx.service, objectStorage: ctx.storage }));
 
 const handlers = createRouteHandlers({
