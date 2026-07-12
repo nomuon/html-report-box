@@ -13,6 +13,8 @@ import {
   ReportKindSchema,
   ReportStatusSchema,
   ReportTitleSchema,
+  ScanFindingSchema,
+  ScanVerdictSchema,
 } from "./report.ts";
 
 // =====================
@@ -196,6 +198,9 @@ export const GetReportResponseSchema = z.object({
   isOwner: z.boolean(),
   /** Content URL, e.g. https://content.example.com/r/<id>/ (absent unless published). */
   url: z.string().optional(),
+  /** Latest scan outcome — owner/admin viewers only (never exposed publicly). */
+  verdict: ScanVerdictSchema.optional(),
+  findings: z.array(ScanFindingSchema).optional(),
 });
 export type GetReportResponse = z.infer<typeof GetReportResponseSchema>;
 

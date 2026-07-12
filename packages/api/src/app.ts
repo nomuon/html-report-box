@@ -224,10 +224,15 @@ export function createApp(ctx: AppContext): AppType {
 
   app.get("/reports/:id", async (c) => {
     const { report, url, isOwner } = await ctx.service.get(c.req.param("id"), c.get("user"));
+    // Scan outcome is owner/admin-only context (PublicReport omits it by design).
+    const canSeeScan = isOwner || (c.get("user")?.isAdmin ?? false);
     return c.json({
       report: toPublicReport(report),
       isOwner,
       ...(url !== undefined ? { url } : {}),
+      ...(canSeeScan && report.verdict !== undefined
+        ? { verdict: report.verdict, findings: report.findings }
+        : {}),
     });
   });
 

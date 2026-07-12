@@ -313,6 +313,33 @@ test("GET /reports/:id returns isOwner from the viewer context", async () => {
   expect(privAdmin.json.isOwner).toBe(false);
 });
 
+test("GET /reports/:id exposes verdict/findings to owner and admin only", async () => {
+  const env = makeEnv();
+  env.scanner.next = {
+    verdict: "warn",
+    findings: [
+      {
+        ruleId: "external-form-action",
+        severity: "warn",
+        message: "form submits to an external origin",
+      },
+    ],
+  };
+  const { id } = await uploadPublished(env, "alice", "Warned");
+
+  const owner = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(owner.json.verdict).toBe("warn");
+  expect(owner.json.findings).toHaveLength(1);
+  const admin = await call(env.app, "GET", `/reports/${id}`, { user: "admin" });
+  expect(admin.json.verdict).toBe("warn");
+  // 非オーナー/未認証にはスキャン結果を出さない（PublicReport と同じ扱い）
+  const other = await call(env.app, "GET", `/reports/${id}`, { user: "bob" });
+  expect(other.json.verdict).toBeUndefined();
+  expect(other.json.findings).toBeUndefined();
+  const unauth = await call(env.app, "GET", `/reports/${id}`);
+  expect(unauth.json.verdict).toBeUndefined();
+});
+
 test("complete with an unknown key → 400", async () => {
   const env = makeEnv();
   const created = await call(env.app, "POST", "/reports", {

@@ -11,6 +11,7 @@ import { UploadAbortedError, uploadToPresigned } from "../lib/upload.ts";
 import { DROPZONE_INITIAL, dropzoneReducer, validateFiles } from "../state/dropzone.ts";
 import { Button } from "./Button.tsx";
 import { DropZone } from "./DropZone.tsx";
+import { FindingsList } from "./FindingsList.tsx";
 import { Icon } from "./Icon.tsx";
 import { Modal } from "./Modal.tsx";
 import { useToast } from "./Toast.tsx";
@@ -202,13 +203,7 @@ export function EditHtmlModal({
             <div className="hrb-editor-rejected" role="alert">
               <strong>セキュリティスキャンで拒否されました。</strong>
               修正して保存し直すまでレポートは非公開の「拒否」状態になります
-              <ul className="hrb-findings">
-                {rejectedFindings.map((f, i) => (
-                  <li key={i} className="hrb-findings__item">
-                    {f.message}
-                  </li>
-                ))}
-              </ul>
+              <FindingsList findings={rejectedFindings} />
             </div>
           )}
         </>
@@ -366,13 +361,7 @@ export function OverwriteReportModal({
         {state.report.verdict === "warn" && (
           <div className="hrb-upload-result__findings">
             <p className="hrb-upload-result__note">スキャンで注意項目が見つかりました:</p>
-            <ul className="hrb-findings">
-              {state.report.findings.map((f, i) => (
-                <li key={i} className="hrb-findings__item">
-                  {f.message}
-                </li>
-              ))}
-            </ul>
+            <FindingsList findings={state.report.findings} />
           </div>
         )}
         <div className="hrb-upload-result__actions">
@@ -387,13 +376,7 @@ export function OverwriteReportModal({
         <h2 className="hrb-upload-result__title hrb-upload-result__title--danger">
           アップロードを拒否しました
         </h2>
-        <ul className="hrb-findings">
-          {state.findings.map((f, i) => (
-            <li key={i} className="hrb-findings__item">
-              {f.message}
-            </li>
-          ))}
-        </ul>
+        <FindingsList findings={state.findings} />
         <div className="hrb-upload-result__actions">
           <Button variant="secondary" onClick={() => dispatch({ type: "RESET" })}>
             別のファイルを試す

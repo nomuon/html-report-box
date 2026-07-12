@@ -2,12 +2,12 @@
 import { useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ScanFinding } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
 import { CopyUrlRow } from "../components/CopyUrlRow.tsx";
 import { DropZone } from "../components/DropZone.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
+import { FindingsList } from "../components/FindingsList.tsx";
 import { LoginModal } from "../components/Header.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { useToast } from "../components/Toast.tsx";
@@ -15,19 +15,6 @@ import { extractHtmlTitle, titleFromFilename } from "../lib/html-title.ts";
 import { UploadAbortedError, uploadToPresigned } from "../lib/upload.ts";
 import { isApiError } from "../lib/api.ts";
 import { DROPZONE_INITIAL, dropzoneReducer, validateFiles } from "../state/dropzone.ts";
-
-export function FindingsList({ findings }: { findings: ScanFinding[] }) {
-  if (findings.length === 0) return null;
-  return (
-    <ul className="hrb-findings">
-      {findings.map((f, i) => (
-        <li key={i} className="hrb-findings__item">
-          {f.message}
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 export function UploadPage() {
   const { api, config } = useApp();

@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
+import { scanFindingSummary } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
 import { StatusChip } from "../components/Chip.tsx";
@@ -159,6 +160,15 @@ export function ReportDetailPage() {
                 <PublishToggle report={report} />
               ) : (
                 <StatusChip status={report.status} />
+              )}
+              {query.data?.verdict === "warn" && (query.data.findings?.length ?? 0) > 0 && (
+                <span
+                  className="hrb-tip"
+                  data-tip={`スキャン注意項目: ${(query.data.findings ?? []).map(scanFindingSummary).join(" / ")}`}
+                  tabIndex={0}
+                >
+                  <Icon name="info" size={15} />
+                </span>
               )}
               {report.kind === "html" && (
                 <Button variant="secondary" onClick={() => setModal("edit-html")}>

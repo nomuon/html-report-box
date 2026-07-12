@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { OwnedReport } from "@hrb/shared";
+import { scanFindingSummary } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
 import { StatusChip } from "../components/Chip.tsx";
@@ -93,7 +94,7 @@ export function MinePage() {
                       {r.status === "rejected" && r.findings.length > 0 && (
                         <span
                           className="hrb-tip"
-                          data-tip={r.findings.map((f) => f.message).join(" / ")}
+                          data-tip={r.findings.map(scanFindingSummary).join(" / ")}
                           tabIndex={0}
                         >
                           <Icon name="info" size={15} />
@@ -102,7 +103,7 @@ export function MinePage() {
                       {r.status !== "rejected" && r.verdict === "warn" && (
                         <span
                           className="hrb-tip"
-                          data-tip={`スキャン注意項目: ${r.findings.map((f) => f.message).join(" / ")}`}
+                          data-tip={`スキャン注意項目: ${r.findings.map(scanFindingSummary).join(" / ")}`}
                           tabIndex={0}
                         >
                           <Icon name="info" size={15} />
