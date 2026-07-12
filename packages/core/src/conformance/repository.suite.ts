@@ -242,6 +242,21 @@ export function runRepositoryConformance(name: string, factory: RepositoryFactor
       expect(await repo.getDailyUploads("bob", "2026-07-12")).toBe(0);
     });
 
+    test("view counter: increment returns the post-increment count, get reads without consuming", async () => {
+      const repo = await factory();
+      const id = rid("view");
+      await repo.create(makeMeta(id));
+
+      expect(await repo.getViewCount(id)).toBe(0);
+      expect(await repo.incrementViewCount(id)).toBe(1);
+      expect(await repo.incrementViewCount(id)).toBe(2);
+      expect(await repo.getViewCount(id)).toBe(2);
+      // 読み取りはカウントを消費しない。
+      expect(await repo.getViewCount(id)).toBe(2);
+      // 別レポートは独立。
+      expect(await repo.getViewCount(rid("other"))).toBe(0);
+    });
+
     test("flags: add/list, listFlagged surfaces flagged ids, clearFlags resolves", async () => {
       const repo = await factory();
       const flagged = rid("flg");
@@ -268,13 +283,14 @@ export function runRepositoryConformance(name: string, factory: RepositoryFactor
       expect(await repo.listFlagged()).toEqual([]);
     });
 
-    test("delete removes META along with tokens, pending pointer, and flags", async () => {
+    test("delete removes META along with tokens, pending pointer, flags, and view counter", async () => {
       const repo = await factory();
       const id = rid("del");
       await repo.create(makeMeta(id));
       await repo.putDocumentTokens(id, ["alpha"]);
       await repo.setPendingUpload(id, "staging/del/u1");
       await repo.addFlag(id, makeFlag());
+      await repo.incrementViewCount(id);
 
       await repo.delete(id);
 
@@ -283,6 +299,7 @@ export function runRepositoryConformance(name: string, factory: RepositoryFactor
       expect(await repo.getPendingUpload(id)).toBeNull();
       expect(await repo.listFlags(id)).toEqual([]);
       expect(await repo.listFlagged()).toEqual([]);
+      expect(await repo.getViewCount(id)).toBe(0);
     });
   });
 }

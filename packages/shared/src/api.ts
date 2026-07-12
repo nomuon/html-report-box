@@ -218,6 +218,8 @@ export const GetReportResponseSchema = z.object({
   /** Latest scan outcome — owner/admin viewers only (never exposed publicly). */
   verdict: ScanVerdictSchema.optional(),
   findings: z.array(ScanFindingSchema).optional(),
+  /** 累計閲覧数 — owner/admin viewers only（他人には閲覧数を晒さない）。 */
+  viewCount: z.number().int().nonnegative().optional(),
 });
 export type GetReportResponse = z.infer<typeof GetReportResponseSchema>;
 

@@ -635,6 +635,14 @@ a.hrb-table__title:hover {
   white-space: nowrap;
 }
 
+/* 閲覧数セル（マイレポート） */
+.hrb-table__views {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .hrb-status-cell {
   display: inline-flex;
   align-items: center;

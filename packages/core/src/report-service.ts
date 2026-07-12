@@ -122,20 +122,33 @@ export class ReportService {
   /**
    * Visibility: published / unlisted → anyone; otherwise owner or admin only
    * (non-visible reports surface as not_found, never as forbidden).
+   * Publicly served reads by anyone but the owner bump the view counter
+   * (best-effort); viewCount is returned to the owner / admin only.
    */
   async get(
     id: string,
     viewer?: AuthUser | null,
-  ): Promise<{ report: ReportMeta; url?: string; isOwner: boolean }> {
+  ): Promise<{ report: ReportMeta; url?: string; isOwner: boolean; viewCount?: number }> {
     const meta = await this.repo.get(id);
     if (!meta) throw new DomainError("not_found", "report not found");
     const isOwner = viewer != null && viewer.sub === meta.ownerSub;
-    const visible = this.isPubliclyServed(meta.status) || isOwner || (viewer?.isAdmin ?? false);
+    const isAdmin = viewer?.isAdmin ?? false;
+    const visible = this.isPubliclyServed(meta.status) || isOwner || isAdmin;
     if (!visible) throw new DomainError("not_found", "report not found");
-    if (this.isPubliclyServed(meta.status)) {
-      return { report: meta, url: this.contentUrl(id), isOwner };
+    if (this.isPubliclyServed(meta.status) && !isOwner) {
+      // ベストエフォート: カウンタ障害で閲覧自体を妨げない。
+      await this.repo.incrementViewCount(id).catch(() => {});
     }
-    return { report: meta, isOwner };
+    const viewCount = isOwner || isAdmin ? await this.repo.getViewCount(id) : undefined;
+    if (this.isPubliclyServed(meta.status)) {
+      return {
+        report: meta,
+        url: this.contentUrl(id),
+        isOwner,
+        ...(viewCount !== undefined ? { viewCount } : {}),
+      };
+    }
+    return { report: meta, isOwner, ...(viewCount !== undefined ? { viewCount } : {}) };
   }
 
   /**
@@ -186,8 +199,16 @@ export class ReportService {
   // Owner operations
   // =====================
 
-  async listMine(user: AuthUser, opts?: PageOptions): Promise<Page<ReportMeta>> {
-    return this.repo.listByOwner(user.sub, opts);
+  /** 自分のレポート一覧。各行に累計閲覧数を付与する（マイレポートの表示用）。 */
+  async listMine(
+    user: AuthUser,
+    opts?: PageOptions,
+  ): Promise<Page<ReportMeta & { viewCount: number }>> {
+    const page = await this.repo.listByOwner(user.sub, opts);
+    const items = await Promise.all(
+      page.items.map(async (meta) => ({ ...meta, viewCount: await this.repo.getViewCount(meta.id) })),
+    );
+    return { items, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) };
   }
 
   /** Daily upload quota status for the caller (GET /me/quota). */

@@ -573,6 +573,43 @@ test("GET /reports/:id exposes verdict/findings to owner and admin only", async 
   expect(unauth.json.verdict).toBeUndefined();
 });
 
+test("GET /reports/:id counts views and exposes viewCount to owner/admin only", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Counted");
+
+  // 他人・未認証の閲覧はカウントされ、viewCount は返らない
+  const other = await call(env.app, "GET", `/reports/${id}`, { user: "bob" });
+  expect(other.json.viewCount).toBeUndefined();
+  const unauth = await call(env.app, "GET", `/reports/${id}`);
+  expect(unauth.json.viewCount).toBeUndefined();
+
+  // オーナーの閲覧はカウントされず、累計が見える
+  const owner = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(owner.json.viewCount).toBe(2);
+  const again = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(again.json.viewCount).toBe(2);
+
+  // 非公開に戻すと閲覧は増えない（オーナー/管理者しか読めない）
+  await call(env.app, "POST", `/reports/${id}/unpublish`, { user: "alice" });
+  const priv = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(priv.json.viewCount).toBe(2);
+  const privAdmin = await call(env.app, "GET", `/reports/${id}`, { user: "admin" });
+  expect(privAdmin.json.viewCount).toBe(2);
+});
+
+test("GET /me/reports includes viewCount per report; DELETE purges the counter", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Mine Counted");
+  await call(env.app, "GET", `/reports/${id}`, { user: "bob" });
+
+  const mine = await call(env.app, "GET", "/me/reports", { user: "alice" });
+  expect(mine.status).toBe(200);
+  expect(mine.json.reports[0].viewCount).toBe(1);
+
+  await call(env.app, "DELETE", `/reports/${id}`, { user: "alice" });
+  expect(await env.ctx.repo.getViewCount(id)).toBe(0);
+});
+
 test("complete with an unknown key → 400", async () => {
   const env = makeEnv();
   const created = await call(env.app, "POST", "/reports", {

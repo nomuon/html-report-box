@@ -57,7 +57,7 @@ export function MinePage() {
         <h1 className="hrb-page__title">マイレポート</h1>
       </div>
 
-      {query.isLoading && <TableSkeleton columns={4} />}
+      {query.isLoading && <TableSkeleton columns={5} />}
 
       {!query.isLoading && reports.length === 0 && (
         <EmptyState
@@ -74,6 +74,7 @@ export function MinePage() {
               <tr>
                 <th>タイトル</th>
                 <th>公開状態</th>
+                <th>閲覧数</th>
                 <th>更新日時</th>
                 <th>操作</th>
               </tr>
@@ -116,6 +117,7 @@ export function MinePage() {
                       )}
                     </span>
                   </td>
+                  <td className="hrb-table__views">{r.viewCount ?? 0}</td>
                   <td className="hrb-table__date">{formatDateTime(r.updatedAt)}</td>
                   <td>
                     <div className="hrb-row-actions">

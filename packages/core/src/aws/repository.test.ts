@@ -11,6 +11,7 @@ import {
   SK_META,
   SK_TOKENS,
   SK_UPLOAD,
+  SK_VIEWS,
   itemToMeta,
   metaToItem,
   quotaPk,
@@ -315,6 +316,31 @@ describe("daily upload quota (conditional counter)", () => {
   });
 });
 
+describe("view counter", () => {
+  test("incrementViewCount adds atomically on the VIEWS item of the report partition", async () => {
+    const client = new FakeClient().on("UpdateCommand", () => ({ Attributes: { cnt: 4 } }));
+    expect(await repo(client).incrementViewCount("x")).toBe(4);
+    const [input] = client.inputsOf("UpdateCommand");
+    expect(input.Key).toEqual({ pk: reportPk("x"), sk: SK_VIEWS });
+    expect(input.UpdateExpression).toBe("ADD #c :one");
+    expect(input.ExpressionAttributeNames).toEqual({ "#c": "cnt" });
+    expect(input.ExpressionAttributeValues).toEqual({ ":one": 1 });
+    expect(input.ReturnValues).toBe("ALL_NEW");
+  });
+
+  test("getViewCount reads the VIEWS item, 0 when absent", async () => {
+    const empty = new FakeClient();
+    expect(await repo(empty).getViewCount("x")).toBe(0);
+    const [input] = empty.inputsOf("GetCommand");
+    expect(input.Key).toEqual({ pk: reportPk("x"), sk: SK_VIEWS });
+
+    const client = new FakeClient().on("GetCommand", () => ({
+      Item: { pk: reportPk("x"), sk: SK_VIEWS, cnt: 12 },
+    }));
+    expect(await repo(client).getViewCount("x")).toBe(12);
+  });
+});
+
 describe("delete / flags", () => {
   test("delete removes every item in the report partition", async () => {
     const pk = reportPk("gone");
@@ -323,6 +349,7 @@ describe("delete / flags", () => {
         { pk, sk: SK_META },
         { pk, sk: SK_TOKENS },
         { pk, sk: SK_UPLOAD },
+        { pk, sk: SK_VIEWS },
         { pk, sk: `${FLAG_SK_PREFIX}2026-07-01T00:00:00.000Z#a` },
       ],
     }));
@@ -332,11 +359,12 @@ describe("delete / flags", () => {
     expect(query.ExpressionAttributeValues[":pk"]).toBe(pk);
     const [batch] = client.inputsOf("BatchWriteCommand");
     const deletes = batch.RequestItems[TABLE];
-    expect(deletes.length).toBe(4);
+    expect(deletes.length).toBe(5);
     expect(deletes.map((d: { DeleteRequest: { Key: { sk: string } } }) => d.DeleteRequest.Key.sk)).toEqual([
       SK_META,
       SK_TOKENS,
       SK_UPLOAD,
+      SK_VIEWS,
       `${FLAG_SK_PREFIX}2026-07-01T00:00:00.000Z#a`,
     ]);
   });

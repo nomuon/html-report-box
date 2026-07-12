@@ -112,7 +112,7 @@ export interface ReportRepository {
   get(id: string): Promise<ReportMeta | null>;
   getMany(ids: readonly string[]): Promise<Map<string, ReportMeta>>;
   update(meta: ReportMeta): Promise<void>;
-  /** Removes META, TOKENS, pending-upload pointer and flags for the id. */
+  /** Removes META, TOKENS, pending-upload pointer, flags and view counter for the id. */
   delete(id: string): Promise<void>;
   /** status=published only, updatedAt ordered (default descending), optional kind filter. */
   listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>>;
@@ -131,6 +131,10 @@ export interface ReportRepository {
   incrementDailyUploads(ownerSub: string, dateKey: string): Promise<number>;
   /** Current upload count for ownerSub on dateKey (0 when nothing was uploaded). */
   getDailyUploads(ownerSub: string, dateKey: string): Promise<number>;
+  /** Post-increment total view count（閲覧数カウンタ）. Callers may treat failures as best-effort. */
+  incrementViewCount(id: string): Promise<number>;
+  /** Current view count (0 when the report was never viewed). */
+  getViewCount(id: string): Promise<number>;
   addFlag(id: string, flag: ReportFlag): Promise<void>;
   listFlags(id: string): Promise<ReportFlag[]>;
   /** Every report id that currently has at least one flag (admin 通報一覧). */

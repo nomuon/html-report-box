@@ -5,6 +5,7 @@
  *   sk = "META"          report metadata (+ GSI projections, see below)
  *   sk = "TOKENS"        list of tokens registered in the search index
  *   sk = "UPLOAD"        staging key of the latest issued presigned upload
+ *   sk = "VIEWS"         total view counter (閲覧数)
  *   sk = "FLAG#<ts>#<n>" abuse flags
  *   pk = "Q#<ownerSub>", sk = "D#<YYYY-MM-DD>"  daily upload quota counter
  *
@@ -37,6 +38,7 @@ import type { CommandClient } from "./types.ts";
 export const SK_META = "META";
 export const SK_TOKENS = "TOKENS";
 export const SK_UPLOAD = "UPLOAD";
+export const SK_VIEWS = "VIEWS";
 export const FLAG_SK_PREFIX = "FLAG#";
 /** Fixed GSI1 partition: only published META items carry it (sparse index). */
 export const GSI1_PUBLISHED_PK = "PUB";
@@ -412,6 +414,38 @@ export class DynamoReportRepository implements ReportRepository {
       new GetCommand({
         TableName: this.tableName,
         Key: { pk: quotaPk(ownerSub), sk: quotaSk(dateKey) },
+      }),
+    );
+    const cnt = (res?.Item as { cnt?: unknown } | undefined)?.cnt;
+    return typeof cnt === "number" ? cnt : 0;
+  }
+
+  // ---- View counter ----
+
+  /**
+   * Atomic, uncapped counter on the VIEWS item of the report partition
+   * (swept together with everything else by delete()).
+   */
+  async incrementViewCount(id: string): Promise<number> {
+    const res = await this.client.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: { pk: reportPk(id), sk: SK_VIEWS },
+        UpdateExpression: "ADD #c :one",
+        ExpressionAttributeNames: { "#c": "cnt" },
+        ExpressionAttributeValues: { ":one": 1 },
+        ReturnValues: "ALL_NEW",
+      }),
+    );
+    const cnt = (res?.Attributes as { cnt?: unknown } | undefined)?.cnt;
+    return typeof cnt === "number" ? cnt : 0;
+  }
+
+  async getViewCount(id: string): Promise<number> {
+    const res = await this.client.send(
+      new GetCommand({
+        TableName: this.tableName,
+        Key: { pk: reportPk(id), sk: SK_VIEWS },
       }),
     );
     const cnt = (res?.Item as { cnt?: unknown } | undefined)?.cnt;

@@ -148,6 +148,13 @@ export function ReportDetailPage() {
             <span>{report.ownerName}</span>
             <span aria-hidden="true">·</span>
             <span>更新 {formatDateTime(report.updatedAt)}</span>
+            {/* viewCount は API がオーナー/管理者の文脈でのみ返す */}
+            {query.data?.viewCount !== undefined && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>閲覧数 {query.data.viewCount}</span>
+              </>
+            )}
             {!canEdit && (
               <>
                 <span aria-hidden="true">·</span>

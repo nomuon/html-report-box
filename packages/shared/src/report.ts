@@ -150,6 +150,9 @@ export type PublicReport = z.infer<typeof PublicReportSchema>;
 export const OwnedReportSchema = ReportMetaSchema.omit({
   sourceIp: true,
   userAgent: true,
+}).extend({
+  /** 累計閲覧数（オーナー向け一覧で付与。META には保存されないカウンタ由来）。 */
+  viewCount: z.number().int().nonnegative().optional(),
 });
 export type OwnedReport = z.infer<typeof OwnedReportSchema>;
 
@@ -161,6 +164,6 @@ export function toPublicReport(meta: ReportMeta): PublicReport {
   return PublicReportSchema.parse(meta);
 }
 
-export function toOwnedReport(meta: ReportMeta): OwnedReport {
+export function toOwnedReport(meta: ReportMeta & { viewCount?: number }): OwnedReport {
   return OwnedReportSchema.parse(meta);
 }

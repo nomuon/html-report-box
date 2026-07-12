@@ -443,6 +443,61 @@ describe("daily upload quota", () => {
   });
 });
 
+describe("view counts (閲覧数)", () => {
+  test("published get by others / anonymous increments; owner reads do not", async () => {
+    const { report } = await uploadPublished(alice, { title: "閲覧対象" }, html("v", "本文"));
+
+    await ctx.service.get(report.id); // anonymous
+    await ctx.service.get(report.id, bob); // other user
+    // owner の閲覧はカウントしない（自分の確認で数字が膨らまない）
+    const owner = await ctx.service.get(report.id, alice);
+    expect(owner.viewCount).toBe(2);
+    expect(await ctx.repo.getViewCount(report.id)).toBe(2);
+  });
+
+  test("viewCount is returned to owner and admin only", async () => {
+    const { report } = await uploadPublished(alice, { title: "閲覧数の可視性" }, html("v", "本文"));
+    await ctx.service.get(report.id, bob);
+
+    expect((await ctx.service.get(report.id, alice)).viewCount).toBe(1);
+    // admin はオーナーではないので閲覧としてカウントされつつ、値も見える
+    expect((await ctx.service.get(report.id, admin)).viewCount).toBe(2);
+    expect((await ctx.service.get(report.id, bob)).viewCount).toBeUndefined();
+    expect((await ctx.service.get(report.id)).viewCount).toBeUndefined();
+  });
+
+  test("private reads do not increment (owner/admin preview is not a view)", async () => {
+    const { report } = await upload(alice, { title: "非公開閲覧" }, html("v", "本文"));
+    await ctx.service.get(report.id, alice);
+    await ctx.service.get(report.id, admin);
+    expect(await ctx.repo.getViewCount(report.id)).toBe(0);
+    // admin にはカウンタ値（0）は返る
+    expect((await ctx.service.get(report.id, admin)).viewCount).toBe(0);
+  });
+
+  test("unlisted views count too; delete purges the counter", async () => {
+    const { report } = await upload(alice, { title: "限定共有の閲覧" }, html("v", "本文"));
+    await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+    await ctx.service.get(report.id, bob);
+    expect(await ctx.repo.getViewCount(report.id)).toBe(1);
+
+    await ctx.service.delete(alice, report.id);
+    expect(await ctx.repo.getViewCount(report.id)).toBe(0);
+  });
+
+  test("listMine attaches the accumulated viewCount to each report", async () => {
+    const { report: seen } = await uploadPublished(alice, { title: "見られた" }, html("a", "本文A"));
+    await upload(alice, { title: "まだ" }, html("b", "本文B"));
+    await ctx.service.get(seen.id, bob);
+    await ctx.service.get(seen.id);
+
+    const page = await ctx.service.listMine(alice);
+    const counts = new Map(page.items.map((m) => [m.title, m.viewCount]));
+    expect(counts.get("見られた")).toBe(2);
+    expect(counts.get("まだ")).toBe(0);
+  });
+});
+
 describe("verdict branching", () => {
   test("warn → private with findings; owner can still publish (no admin gate)", async () => {
     const { report } = await upload(
