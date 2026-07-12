@@ -106,7 +106,7 @@ GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com
 HRB_ADMIN_EMAILS=you@example.com   # カンマ区切り。管理者にするメールアドレス
 ```
 
-3. `bun run dev` — 起動ログに `auth : google (...)` と出れば有効。管理画面からは Google ユーザーの admin 付与/削除（レポートカスケード）も可能。ローカル利便のため `x-dev-user` ヘッダーのフォールバックは google モードでも有効（curl / smoke 用。デプロイには載らないローカル専用アダプタ）。
+3. `bun run dev` — 起動ログに `auth : google (...)` と出れば有効。管理画面からは Google ユーザーの admin 付与/削除（レポートカスケード）も可能。ローカル利便のため `x-dev-user` ヘッダーのフォールバックは google モードでも有効（curl / smoke 用。`HRB_TARGET=vps` では無効化される）。
 
 AWS 本番は従来どおり Cognito(Google IdP) 連携の設計で、この直接続フローは `core/src/local/` に閉じている。
 
@@ -120,6 +120,10 @@ bun run --filter @hrb/infra synth    # Lambda バンドル + cdk synth
 ```
 
 `scripts/smoke.ts` は実サーバーに対する E2E で、アップロード（HTML/zip → private → 公開）→ 配信 → 悪性検体の block（zip-slip / eval+atob / フィッシングフォーム）→ warn（private + オーナー自身の公開）→ 非公開化/再公開 + ソース取得 + HTML 直接編集 → 上書き（version+1・旧インデックス掃除）→ 通報 + レート制限 + admin 通報一覧/解決 → テイクダウン → 認可 → MCP 3 ツール → 削除、までを検証する。
+
+## デプロイ（ホスト先の選択）
+
+ホスト先は環境変数 `HRB_TARGET` ひとつで選ぶ — 手元開発は **dev**（既定、`bun run dev`）、VPS 1 台での公開は **vps**（`HRB_TARGET=vps bun run start`。2 リスナーでオリジン分離・Google 認証必須・`x-dev-user` 無効）、マネージド構成は **aws**（CDK デプロイ）。必要な環境変数・Caddy/systemd の手順・運用の限界は **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** を参照。設定不備は起動時に全件まとめてエラー表示される。
 
 ## MCP 接続
 
