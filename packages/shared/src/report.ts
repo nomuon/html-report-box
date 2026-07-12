@@ -120,6 +120,12 @@ export const ReportMetaSchema = z.object({
   sizeBytes: z.number().int().nonnegative().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
+  /**
+   * 公開の有効期限（ISO 8601）。未設定は無期限。期限を過ぎた published /
+   * unlisted は読み取りパスで「公開されていない」扱いになる（遅延失効 —
+   * status 自体は書き換えない。ReportService.isExpired 参照）。
+   */
+  expiresAt: z.iso.datetime({ offset: true }).optional(),
   /** Result of the latest security scan. Absent until the first upload completes. */
   verdict: ScanVerdictSchema.optional(),
   findings: z.array(ScanFindingSchema).default([]),

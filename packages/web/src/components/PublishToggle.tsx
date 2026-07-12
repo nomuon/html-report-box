@@ -3,9 +3,11 @@
  * 公開は共有URLが開くため確認モーダルを挟み、公開範囲を選択する:
  *   published — 社内公開（一覧・検索に表示）
  *   unlisted  — リンク限定（一覧・検索に載せず、URLを知る人のみ閲覧可）
- * 公開中は「公開範囲」ボタンで published⇔unlisted を切替できる（publish の
- * 再呼び出し）。非公開化は即時実行（再度トグルすればすぐ公開に戻せる）。
- * rejected / takedown は切替不可。
+ * あわせて公開期限（無期限 / 1週間 / 1ヶ月 / 日時指定）を選択できる。
+ * 期限を過ぎると一覧・検索・閲覧から消える（遅延失効 — 再公開で復活可）。
+ * 公開中は「公開範囲」ボタンで published⇔unlisted の切替や期限の再設定が
+ * できる（publish の再呼び出し）。非公開化は即時実行（再度トグルすれば
+ * すぐ公開に戻せる）。rejected / takedown は切替不可。
  * 切替は楽観的更新: onMutate でキャッシュの status を先行更新し、
  * 失敗時はロールバック + エラー toast、onSettled で invalidate する。
  */
@@ -47,10 +49,28 @@ const VISIBILITY_OPTIONS: Array<{
   },
 ];
 
-type PublishAction = { type: "publish"; visibility: PublishVisibility } | { type: "unpublish" };
+type PublishAction =
+  | { type: "publish"; visibility: PublishVisibility; expiresAt?: string }
+  | { type: "unpublish" };
+
+/** 公開期限プリセット。custom は datetime-local 入力で日時を指定する。 */
+type ExpiryPreset = "none" | "week" | "month" | "custom";
+
+const EXPIRY_OPTIONS: Array<{ value: ExpiryPreset; label: string }> = [
+  { value: "none", label: "無期限" },
+  { value: "week", label: "1週間" },
+  { value: "month", label: "1ヶ月" },
+  { value: "custom", label: "日時指定" },
+];
+
+/** Date → input[type=datetime-local] 値（ローカル時刻の "YYYY-MM-DDTHH:mm"）。 */
+function toDatetimeLocalValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
 export interface PublishToggleProps {
-  report: { id: string; title: string; status: ReportStatus };
+  report: { id: string; title: string; status: ReportStatus; expiresAt?: string };
   /** 公開成功時に共有URLなどを受け取りたい画面向け。 */
   onPublished?: (url: string) => void;
 }
@@ -61,6 +81,9 @@ export function PublishToggle({ report, onPublished }: PublishToggleProps) {
   const qc = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [visibility, setVisibility] = useState<PublishVisibility>("published");
+  const [expiryPreset, setExpiryPreset] = useState<ExpiryPreset>("none");
+  const [customExpiry, setCustomExpiry] = useState("");
+  const [expiryError, setExpiryError] = useState<string | null>(null);
 
   const isPublic = report.status === "published" || report.status === "unlisted";
   const togglable = isPublic || report.status === "private";
@@ -72,7 +95,9 @@ export function PublishToggle({ report, onPublished }: PublishToggleProps) {
   const mutation = useMutation({
     // 戻り値は公開時の共有 URL（非公開化は undefined）
     mutationFn: async (action: PublishAction) => {
-      if (action.type === "publish") return (await api.publishReport(report.id, action.visibility)).url;
+      if (action.type === "publish") {
+        return (await api.publishReport(report.id, action.visibility, action.expiresAt)).url;
+      }
       await api.unpublishReport(report.id);
       return undefined;
     },
@@ -121,16 +146,46 @@ export function PublishToggle({ report, onPublished }: PublishToggleProps) {
   });
 
   const openConfirm = () => {
-    // 公開中は現在の公開範囲を初期選択にする
+    // 公開中は現在の公開範囲・期限を初期選択にする（期限切れの再公開は無期限から）
     setVisibility(report.status === "unlisted" ? "unlisted" : "published");
+    const active = report.expiresAt !== undefined && Date.parse(report.expiresAt) > Date.now();
+    setExpiryPreset(active ? "custom" : "none");
+    setCustomExpiry(active ? toDatetimeLocalValue(new Date(report.expiresAt!)) : "");
+    setExpiryError(null);
     setConfirming(true);
   };
 
+  /** プリセットから expiresAt (ISO 8601) を組み立てる。不正な日時指定は null。 */
+  const resolveExpiresAt = (): string | undefined | null => {
+    if (expiryPreset === "none") return undefined;
+    if (expiryPreset === "week") {
+      return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    }
+    if (expiryPreset === "month") {
+      const d = new Date();
+      d.setMonth(d.getMonth() + 1);
+      return d.toISOString();
+    }
+    const parsed = customExpiry.length > 0 ? Date.parse(customExpiry) : Number.NaN;
+    if (Number.isNaN(parsed)) return null;
+    if (parsed <= Date.now()) return null;
+    return new Date(parsed).toISOString();
+  };
+
   const confirm = () => {
+    const expiresAt = resolveExpiresAt();
+    if (expiresAt === null) {
+      setExpiryError("未来の日時を指定してください");
+      return;
+    }
     setConfirming(false);
-    // 公開範囲の変更で現在と同じ選択なら何もしない
-    if (report.status === visibility) return;
-    mutation.mutate({ type: "publish", visibility });
+    // 公開範囲・期限とも現在と同じなら何もしない
+    if (report.status === visibility && report.expiresAt === expiresAt) return;
+    mutation.mutate({
+      type: "publish",
+      visibility,
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
+    });
   };
 
   return (
@@ -196,6 +251,52 @@ export function PublishToggle({ report, onPublished }: PublishToggleProps) {
               </span>
             </label>
           ))}
+        </div>
+        <div className="hrb-expiry">
+          <span className="hrb-expiry__label">公開期限</span>
+          <div className="hrb-expiry__options" role="radiogroup" aria-label="公開期限">
+            {EXPIRY_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className={`hrb-expiry-option ${
+                  expiryPreset === opt.value ? "hrb-expiry-option--active" : ""
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="hrb-publish-expiry"
+                  value={opt.value}
+                  checked={expiryPreset === opt.value}
+                  onChange={() => {
+                    setExpiryPreset(opt.value);
+                    setExpiryError(null);
+                  }}
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+          {expiryPreset === "custom" && (
+            <input
+              type="datetime-local"
+              className="hrb-input hrb-expiry__input"
+              aria-label="公開期限の日時"
+              value={customExpiry}
+              min={toDatetimeLocalValue(new Date())}
+              onChange={(e) => {
+                setCustomExpiry(e.target.value);
+                setExpiryError(null);
+              }}
+            />
+          )}
+          {expiryError !== null && (
+            <p className="hrb-expiry__error" role="alert">
+              {expiryError}
+            </p>
+          )}
+          <span className="hrb-expiry__detail">
+            期限を過ぎると自動的に一覧・検索・閲覧から外れます（再公開で戻せます）
+          </span>
         </div>
       </Modal>
     </>

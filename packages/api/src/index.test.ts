@@ -503,6 +503,53 @@ test("publish with visibility=unlisted: link-only — anyone can read, never lis
   expect((await call(env.app, "GET", `/reports/${id}`)).status).toBe(404);
 });
 
+test("publish with expiresAt: past is rejected; expiry hides the report (遅延失効); PATCH null clears", async () => {
+  let clock = new Date("2026-07-12T00:00:00.000Z");
+  const env = makeEnv({ now: () => clock });
+  const { id } = await upload(env, "alice", "期限つきレポート");
+
+  // 過去日時は validation_failed
+  const past = new Date(clock.getTime() - 1000).toISOString();
+  const bad = await call(env.app, "POST", `/reports/${id}/publish`, {
+    user: "alice",
+    body: { expiresAt: past },
+  });
+  expect(bad.status).toBe(400);
+  expect(bad.json.error.code).toBe("validation_failed");
+
+  // 未来の期限つきで公開 → 期限前は誰でも見える
+  const expiresAt = new Date(clock.getTime() + 60 * 60 * 1000).toISOString();
+  const ok = await call(env.app, "POST", `/reports/${id}/publish`, {
+    user: "alice",
+    body: { expiresAt },
+  });
+  expect(ok.status).toBe(200);
+  expect(ok.json.report.expiresAt).toBe(expiresAt);
+  expect((await call(env.app, "GET", `/reports/${id}`, { user: "bob" })).status).toBe(200);
+
+  // 期限経過 → 非オーナーには 404、一覧・検索からも消える
+  clock = new Date(clock.getTime() + 2 * 60 * 60 * 1000);
+  expect((await call(env.app, "GET", `/reports/${id}`, { user: "bob" })).status).toBe(404);
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(0);
+  expect((await call(env.app, "GET", "/search?q=期限つき")).json.results).toHaveLength(0);
+
+  // オーナーはメタを閲覧でき（url なし）、過去の expiresAt で期限切れが分かる
+  const mine = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(mine.status).toBe(200);
+  expect(mine.json.url).toBeUndefined();
+  expect(mine.json.report.status).toBe("published");
+  expect(mine.json.report.expiresAt).toBe(expiresAt);
+
+  // PATCH expiresAt=null で無期限に戻す → 再び見える（遅延失効は status を変えないため）
+  const cleared = await call(env.app, "PATCH", `/reports/${id}`, {
+    user: "alice",
+    body: { expiresAt: null },
+  });
+  expect(cleared.status).toBe(200);
+  expect(cleared.json.report.expiresAt).toBeUndefined();
+  expect((await call(env.app, "GET", `/reports/${id}`, { user: "bob" })).status).toBe(200);
+});
+
 test("admin can filter /admin/reports by status=unlisted and take an unlisted report down", async () => {
   const env = makeEnv();
   await uploadPublished(env, "alice", "Listed One");

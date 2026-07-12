@@ -7,7 +7,7 @@ import { scanFindingSummary } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
 import { ApiKeysSection } from "../components/ApiKeysSection.tsx";
 import { Button } from "../components/Button.tsx";
-import { StatusChip, TagList } from "../components/Chip.tsx";
+import { ExpiryChip, StatusChip, TagList } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { PublishToggle } from "../components/PublishToggle.tsx";
@@ -97,6 +97,7 @@ export function MinePage() {
                       ) : (
                         <StatusChip status={r.status} />
                       )}
+                      <ExpiryChip status={r.status} expiresAt={r.expiresAt} />
                       {r.status === "rejected" && r.findings.length > 0 && (
                         <span
                           className="hrb-tip"

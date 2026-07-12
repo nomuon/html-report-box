@@ -1,4 +1,5 @@
 import type { ReportKind, ReportStatus, ScanVerdict } from "@hrb/shared";
+import { formatDateTime } from "../lib/format.ts";
 
 export const STATUS_LABELS: Record<ReportStatus, string> = {
   published: "公開中",
@@ -71,6 +72,30 @@ const VERDICT_CLASS: Record<ScanVerdict, string> = {
   warn: "hrb-chip--warn",
   block: "hrb-chip--rejected",
 };
+
+/**
+ * 公開期限バッジ。published / unlisted で expiresAt がある場合のみ描画:
+ * 期限内は「〜まで公開」、期限を過ぎたら「期限切れ（非公開）」（遅延失効 —
+ * status は published のままでも読み取りパスでは非公開扱いになる）。
+ */
+export function ExpiryChip({
+  status,
+  expiresAt,
+}: {
+  status: ReportStatus;
+  expiresAt?: string | undefined;
+}) {
+  if (expiresAt === undefined || (status !== "published" && status !== "unlisted")) return null;
+  const expired = Date.parse(expiresAt) <= Date.now();
+  return expired ? (
+    <span className="hrb-chip hrb-chip--rejected">
+      <span className="hrb-chip__dot" aria-hidden="true" />
+      期限切れ（非公開）
+    </span>
+  ) : (
+    <span className="hrb-chip hrb-chip--warn">{formatDateTime(expiresAt)}まで公開</span>
+  );
+}
 
 /** スキャン判定バッジ（バージョン履歴などオーナー/管理者向け画面用）。 */
 export function VerdictChip({ verdict }: { verdict: ScanVerdict }) {

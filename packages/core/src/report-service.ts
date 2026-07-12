@@ -116,7 +116,10 @@ export class ReportService {
   }
 
   async listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>> {
-    return this.repo.listPublished(opts);
+    const page = await this.repo.listPublished(opts);
+    // 遅延失効: 期限切れはページ内から間引く（ページが limit より短くなり得る）。
+    const items = page.items.filter((meta) => !this.isExpired(meta));
+    return { items, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) };
   }
 
   /**
@@ -133,14 +136,18 @@ export class ReportService {
     if (!meta) throw new DomainError("not_found", "report not found");
     const isOwner = viewer != null && viewer.sub === meta.ownerSub;
     const isAdmin = viewer?.isAdmin ?? false;
-    const visible = this.isPubliclyServed(meta.status) || isOwner || isAdmin;
+    // 遅延失効: 期限切れは非オーナーには存在しない扱い。オーナー/admin は
+    // メタを閲覧でき（status + 過去の expiresAt で期限切れが分かる）、url は
+    // 返さない = 公開扱いしない。
+    const served = this.isPubliclyServed(meta.status) && !this.isExpired(meta);
+    const visible = served || isOwner || isAdmin;
     if (!visible) throw new DomainError("not_found", "report not found");
-    if (this.isPubliclyServed(meta.status) && !isOwner) {
+    if (served && !isOwner) {
       // ベストエフォート: カウンタ障害で閲覧自体を妨げない。
       await this.repo.incrementViewCount(id).catch(() => {});
     }
     const viewCount = isOwner || isAdmin ? await this.repo.getViewCount(id) : undefined;
-    if (this.isPubliclyServed(meta.status)) {
+    if (served) {
       return {
         report: meta,
         url: this.contentUrl(id),
@@ -173,7 +180,8 @@ export class ReportService {
     const results: Array<SearchResult & { updatedAt: string }> = [];
     for (const hit of hits) {
       const meta = metas.get(hit.reportId);
-      if (!meta || meta.status !== "published") continue;
+      // 遅延失効: 期限切れはインデックスに残っていても結果から除外する。
+      if (!meta || meta.status !== "published" || this.isExpired(meta)) continue;
       results.push({
         report: toPublicReport(meta),
         score: hit.score,
@@ -371,19 +379,28 @@ export class ReportService {
    * visibility: published = 一覧・検索に表示 / unlisted = URL を知る人のみ
    * （一覧・検索インデックスには載せない）。published⇔unlisted の切替も
    * 再呼び出しで行う（コンテンツは配信済みなのでインデックスだけ遷移）。
+   * expiresAt: 公開の有効期限（省略時は無期限 — 既存の期限もクリアされる）。
+   * 失効後もオーナーの再 publish で期限を再設定/クリアできる。
    */
   async publish(
     user: AuthUser,
     id: string,
-    opts?: { visibility?: PublishVisibility },
+    opts?: { visibility?: PublishVisibility; expiresAt?: string },
   ): Promise<{ report: ReportMeta; url: string }> {
     const visibility = opts?.visibility ?? "published";
+    const expiresAt = this.validateExpiresAt(opts?.expiresAt);
     const meta = await this.mustGet(id);
     this.assertOwnerOrAdmin(user, meta);
     if (meta.status === "takedown" && !user.isAdmin) {
       throw new DomainError("forbidden", "report was taken down by an administrator");
     }
     if (meta.status === visibility) {
+      // 期限のみの再設定/クリア（失効後の再 publish を含む）でも META は更新する。
+      if (meta.expiresAt !== expiresAt) {
+        this.setExpiresAt(meta, expiresAt);
+        meta.updatedAt = this.now().toISOString();
+        await this.repo.update(meta);
+      }
       return { report: meta, url: this.contentUrl(id) };
     }
     if (meta.status === "rejected") {
@@ -396,6 +413,7 @@ export class ReportService {
       // published ⇔ unlisted: content objects stay as-is; only the search
       // index membership and META change.
       meta.status = visibility;
+      this.setExpiresAt(meta, expiresAt);
       meta.updatedAt = this.now().toISOString();
       if (visibility === "published") {
         const extracted = await this.storage.getContentObject(
@@ -413,6 +431,7 @@ export class ReportService {
       throw new DomainError("conflict", "report has no publishable content; upload it first");
     }
     const { files, extraction } = await this.extractFiles(meta.kind, data);
+    this.setExpiresAt(meta, expiresAt);
     meta.updatedAt = this.now().toISOString();
     await this.writePublic(meta, files, extraction.text, visibility);
     return { report: meta, url: this.contentUrl(id) };
@@ -439,6 +458,8 @@ export class ReportService {
     await this.removeFromIndex(id);
     await this.storage.deleteContentPrefix(`reports/${id}/`);
     meta.status = "private";
+    // 非公開に戻したら公開期限も意味を失うのでクリアする（再 publish で再設定）。
+    delete meta.expiresAt;
     meta.updatedAt = this.now().toISOString();
     await this.repo.update(meta);
     await this.cdn.invalidate([`/r/${id}/*`]);
@@ -561,6 +582,10 @@ export class ReportService {
     if (request.title !== undefined) meta.title = request.title;
     if (request.description !== undefined) meta.description = request.description;
     if (request.tags !== undefined) meta.tags = request.tags;
+    if (request.expiresAt !== undefined) {
+      // null は無期限に戻す。過去日時は validation エラー。
+      this.setExpiresAt(meta, this.validateExpiresAt(request.expiresAt ?? undefined));
+    }
     meta.updatedAt = this.now().toISOString();
     await this.repo.update(meta);
     if (meta.status === "published") {
@@ -696,6 +721,37 @@ export class ReportService {
   /** published / unlisted — content is served to anyone who has the URL. */
   private isPubliclyServed(status: ReportStatus): status is PublishVisibility {
     return status === "published" || status === "unlisted";
+  }
+
+  /**
+   * 遅延失効: expiresAt を過ぎたレポートは読み取りパス（get / listPublished /
+   * search）で「公開されていない」扱いにする。status は書き換えない。
+   * 既知の制約: 検索インデックスの postings と公開オリジン上のコンテンツ
+   * （reports/<id>/）は失効しても即時には消えない — 一覧/検索/get の応答で
+   * 失効を保証し、配信オリジン側の残存は将来のバッチ/イベント処理で対応する
+   * （README「有効期限つき公開」参照）。
+   */
+  private isExpired(meta: ReportMeta): boolean {
+    return meta.expiresAt !== undefined && Date.parse(meta.expiresAt) <= this.now().getTime();
+  }
+
+  /** publish / update の expiresAt 入力検証: 現在より未来であること。 */
+  private validateExpiresAt(expiresAt: string | undefined): string | undefined {
+    if (expiresAt === undefined) return undefined;
+    const t = Date.parse(expiresAt);
+    if (Number.isNaN(t)) {
+      throw new DomainError("validation_failed", "expiresAt must be an ISO 8601 datetime");
+    }
+    if (t <= this.now().getTime()) {
+      throw new DomainError("validation_failed", "expiresAt must be in the future");
+    }
+    return expiresAt;
+  }
+
+  /** expiresAt を設定（undefined は無期限 = フィールドごと削除）。 */
+  private setExpiresAt(meta: ReportMeta, expiresAt: string | undefined): void {
+    if (expiresAt !== undefined) meta.expiresAt = expiresAt;
+    else delete meta.expiresAt;
   }
 
   private async mustGet(id: string): Promise<ReportMeta> {

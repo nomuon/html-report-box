@@ -58,6 +58,13 @@ POST /api/reports（META 作成 status=private + presigned 発行）
 - `GET /api/reports/:id/source`（オーナー/admin）… 非公開プレビューと HTML 直接編集用のソース取得
 - `PUT /api/reports/:id/content`（オーナー/admin、html のみ）… HTML 直接編集。上書きアップロード同様フルスキャンを再実行
 - コンテンツオリジン（`/r/<id>/`）に載るのは published のみ。「content バケットに存在する = 公開中」の不変条件は維持
+- **有効期限つき公開（遅延失効）** … publish 時に `expiresAt`（ISO 8601、省略時は無期限）を指定でき、
+  `PATCH /api/reports/:id` でも変更/クリア（null）できる。期限を過ぎたレポートは一覧・検索・
+  `GET /api/reports/:id`（非オーナー）から即座に消える（status は書き換えず可視性判定のみ。
+  オーナー/admin はメタを閲覧でき、再 publish で期限の再設定/クリア = 再公開ができる）。
+  既知の制約: バッチ処理を持たない遅延失効のため、検索インデックスの postings と
+  コンテンツ配信オリジン（`/r/<id>/`）上の公開コピーは失効後も即時には消えない
+  （URL 直撃では閲覧できてしまう）。完全な即時失効は将来のバッチ/イベント処理で対応する。
 
 ## パッケージ構成（Bun workspaces モノレポ）
 

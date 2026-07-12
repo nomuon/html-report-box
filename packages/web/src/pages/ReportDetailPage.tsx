@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { scanFindingSummary } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
-import { StatusChip, TagList } from "../components/Chip.tsx";
+import { ExpiryChip, StatusChip, TagList } from "../components/Chip.tsx";
 import { useCopyUrl } from "../components/CopyUrlRow.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
@@ -161,6 +161,8 @@ export function ReportDetailPage() {
                 <StatusChip status={report.status} />
               </>
             )}
+            {/* 公開期限バッジ（期限切れはオーナー/管理者にのみ見える — 他者には 404） */}
+            <ExpiryChip status={report.status} expiresAt={report.expiresAt} />
             <TagList
               tags={report.tags}
               onTagClick={(t) => navigate(`/?tag=${encodeURIComponent(t)}`)}

@@ -999,3 +999,108 @@ describe("legacy source recovery (sources/ 導入前のデータ)", () => {
     expect((await ctx.service.getSource(alice, report.id)).html).toContain("新本文");
   });
 });
+
+describe("有効期限つき公開 (expiresAt — 遅延失効)", () => {
+  let clock: Date;
+  let timed: LocalContext;
+
+  beforeEach(() => {
+    clock = new Date("2026-07-12T00:00:00.000Z");
+    timed = createLocalContext({ dataDir, scanner: markerScanner, now: () => clock });
+  });
+
+  const in1h = () => new Date(clock.getTime() + 60 * 60 * 1000).toISOString();
+  const advance2h = () => {
+    clock = new Date(clock.getTime() + 2 * 60 * 60 * 1000);
+  };
+
+  /** create → staged PUT → complete（クロック注入コンテキスト版） */
+  async function uploadTimed(title: string, body: string): Promise<string> {
+    const { report, upload: up } = await timed.service.create(alice, { title, kind: "html" });
+    await timed.storage.putStagingObject(up.key, enc.encode(html(title, body)));
+    await timed.service.complete(alice, report.id, up.key);
+    return report.id;
+  }
+
+  test("期限前は一覧・検索・get に見え、期限後は非オーナーから消える（オーナー/admin はメタ閲覧可）", async () => {
+    const id = await uploadTimed("期限つき", "四半期の限定共有資料");
+    const expiresAt = in1h();
+    const pub = await timed.service.publish(alice, id, { expiresAt });
+    expect(pub.report.expiresAt).toBe(expiresAt);
+
+    // 期限前: 誰でも見える
+    expect((await timed.service.listPublished()).items.map((m) => m.id)).toContain(id);
+    expect((await timed.service.search("限定共有")).results).toHaveLength(1);
+    expect((await timed.service.get(id, bob)).url).toBeDefined();
+
+    // 期限後: 一覧・検索・get(非オーナー) から消える（status は書き換えない）
+    advance2h();
+    expect((await timed.service.listPublished()).items.map((m) => m.id)).not.toContain(id);
+    expect((await timed.service.search("限定共有")).results).toHaveLength(0);
+    await expectDomainError(timed.service.get(id), "not_found");
+    await expectDomainError(timed.service.get(id, bob), "not_found");
+
+    // オーナー/admin はメタを閲覧でき、過去の expiresAt で期限切れが分かる（url なし = 非公開扱い）
+    const mine = await timed.service.get(id, alice);
+    expect(mine.report.status).toBe("published");
+    expect(mine.report.expiresAt).toBe(expiresAt);
+    expect(mine.url).toBeUndefined();
+    expect((await timed.service.get(id, admin)).url).toBeUndefined();
+  });
+
+  test("失効後の再 publish で復活（期限の再設定も、省略による無期限クリアも可）", async () => {
+    const id = await uploadTimed("再公開", "失効と復活の本文");
+    await timed.service.publish(alice, id, { expiresAt: in1h() });
+    advance2h();
+    await expectDomainError(timed.service.get(id, bob), "not_found");
+
+    // 新しい期限で再 publish → 見える
+    const renewed = await timed.service.publish(alice, id, { expiresAt: in1h() });
+    expect(renewed.report.expiresAt).toBe(in1h());
+    expect((await timed.service.get(id, bob)).url).toBeDefined();
+    expect((await timed.service.search("失効と復活")).results).toHaveLength(1);
+
+    // expiresAt 省略の再 publish は無期限にクリア
+    advance2h();
+    const forever = await timed.service.publish(alice, id);
+    expect(forever.report.expiresAt).toBeUndefined();
+    advance2h();
+    expect((await timed.service.get(id, bob)).url).toBeDefined();
+  });
+
+  test("過去（および現在ちょうど）の expiresAt は publish / update とも validation_failed", async () => {
+    const id = await uploadTimed("過去日時", "検証用の本文");
+    const past = new Date(clock.getTime() - 1000).toISOString();
+    await expectDomainError(
+      timed.service.publish(alice, id, { expiresAt: past }),
+      "validation_failed",
+    );
+    await expectDomainError(
+      timed.service.publish(alice, id, { expiresAt: clock.toISOString() }),
+      "validation_failed",
+    );
+    await timed.service.publish(alice, id);
+    await expectDomainError(
+      timed.service.update(alice, id, { expiresAt: past }),
+      "validation_failed",
+    );
+  });
+
+  test("update (PATCH) で期限を設定でき、null で無期限に戻せる", async () => {
+    const id = await uploadTimed("PATCH期限", "編集用の本文");
+    await timed.service.publish(alice, id);
+    const expiresAt = in1h();
+    const set = await timed.service.update(alice, id, { expiresAt });
+    expect(set.expiresAt).toBe(expiresAt);
+    const cleared = await timed.service.update(alice, id, { expiresAt: null });
+    expect(cleared.expiresAt).toBeUndefined();
+  });
+
+  test("unpublish は期限もクリアする（再 publish で設定し直す）", async () => {
+    const id = await uploadTimed("非公開で期限クリア", "トグル用の本文");
+    await timed.service.publish(alice, id, { expiresAt: in1h() });
+    const hidden = await timed.service.unpublish(alice, id);
+    expect(hidden.status).toBe("private");
+    expect(hidden.expiresAt).toBeUndefined();
+  });
+});

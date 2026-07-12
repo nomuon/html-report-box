@@ -1630,6 +1630,60 @@ a.hrb-table__title:hover {
   color: var(--color-text-muted);
 }
 
+/* 公開確認モーダルの公開期限プリセット */
+.hrb-expiry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
+.hrb-expiry__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.hrb-expiry__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.hrb-expiry-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.hrb-expiry-option--active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-subtle);
+}
+
+.hrb-expiry-option input {
+  accent-color: var(--color-primary);
+}
+
+.hrb-expiry__input {
+  max-width: 240px;
+}
+
+.hrb-expiry__error {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+
+.hrb-expiry__detail {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
 /* ================= HTML エディタモーダル ================= */
 .hrb-modal--wide {
   width: min(960px, calc(100vw - 32px));

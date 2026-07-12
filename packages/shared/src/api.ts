@@ -300,10 +300,20 @@ export const UpdateReportRequestSchema = z
     description: ReportDescriptionSchema.optional(),
     /** 省略時は変更なし（[] を渡すと全削除）。 */
     tags: ReportTagsSchema.optional(),
+    /**
+     * 公開の有効期限（ISO 8601）。省略時は変更なし、null で無期限に戻す。
+     * 過去日時は validation エラー。
+     */
+    expiresAt: z.iso.datetime({ offset: true }).nullable().optional(),
   })
-  .refine((v) => v.title !== undefined || v.description !== undefined || v.tags !== undefined, {
-    message: "at least one of title/description/tags is required",
-  });
+  .refine(
+    (v) =>
+      v.title !== undefined ||
+      v.description !== undefined ||
+      v.tags !== undefined ||
+      v.expiresAt !== undefined,
+    { message: "at least one of title/description/tags/expiresAt is required" },
+  );
 export type UpdateReportRequest = z.infer<typeof UpdateReportRequestSchema>;
 
 export const UpdateReportResponseSchema = z.object({
@@ -322,6 +332,11 @@ export type PublishVisibility = z.infer<typeof PublishVisibilitySchema>;
 
 export const PublishReportRequestSchema = z.object({
   visibility: PublishVisibilitySchema.default("published"),
+  /**
+   * 公開の有効期限（ISO 8601）。省略時は無期限（既存の期限もクリアされる）。
+   * 過去日時は validation エラー。失効後も再 publish で再設定/クリアできる。
+   */
+  expiresAt: z.iso.datetime({ offset: true }).optional(),
 });
 export type PublishReportRequest = z.infer<typeof PublishReportRequestSchema>;
 

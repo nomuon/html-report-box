@@ -343,9 +343,10 @@ export function createApp(ctx: AppContext): AppType {
   });
 
   app.post("/reports/:id/publish", requireAuth, async (c) => {
-    // body は省略可（後方互換）: 省略時は visibility=published
+    // body は省略可（後方互換）: 省略時は visibility=published / 無期限
     const raw = await c.req.text();
     let visibility: PublishVisibility = "published";
+    let expiresAt: string | undefined;
     if (raw.trim().length > 0) {
       let parsed: unknown;
       try {
@@ -353,10 +354,13 @@ export function createApp(ctx: AppContext): AppType {
       } catch {
         throw new DomainError("bad_request", "request body must be valid JSON");
       }
-      visibility = parseWith(PublishReportRequestSchema, parsed, "publish").visibility;
+      const body = parseWith(PublishReportRequestSchema, parsed, "publish");
+      visibility = body.visibility;
+      expiresAt = body.expiresAt;
     }
     const { report, url } = await ctx.service.publish(mustUser(c), c.req.param("id"), {
       visibility,
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
     });
     return c.json({ report: toOwnedReport(report), url });
   });

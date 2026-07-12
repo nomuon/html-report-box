@@ -188,10 +188,17 @@ export class ApiClient {
     return this.request("PATCH", `/reports/${encodeURIComponent(id)}`, { body: patch });
   }
 
-  /** 公開（visibility 省略時は published）。published⇔unlisted の切替も再呼び出しで行う。 */
-  publishReport(id: string, visibility: PublishVisibility = "published"): Promise<PublishReportResponse> {
+  /**
+   * 公開（visibility 省略時は published）。published⇔unlisted の切替や
+   * 有効期限の再設定も再呼び出しで行う（expiresAt 省略時は無期限）。
+   */
+  publishReport(
+    id: string,
+    visibility: PublishVisibility = "published",
+    expiresAt?: string,
+  ): Promise<PublishReportResponse> {
     return this.request("POST", `/reports/${encodeURIComponent(id)}/publish`, {
-      body: { visibility },
+      body: { visibility, ...(expiresAt !== undefined ? { expiresAt } : {}) },
     });
   }
 
