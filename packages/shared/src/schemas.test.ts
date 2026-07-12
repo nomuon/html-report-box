@@ -9,6 +9,7 @@ import {
   ErrorResponseSchema,
   FlagReportRequestSchema,
   GetConfigResponseSchema,
+  GetQuotaResponseSchema,
   isAllowedCdnHost,
   isAllowedZipEntryExtension,
   makeError,
@@ -223,6 +224,23 @@ describe("API response schemas", () => {
     expect(GetConfigResponseSchema.safeParse({ ...base, auth: { mode: "iam" } }).success).toBe(
       false,
     );
+  });
+
+  test("GetQuotaResponse: usedToday/remaining are nonnegative", () => {
+    expect(
+      GetQuotaResponseSchema.safeParse({
+        dailyUploadLimit: DAILY_UPLOAD_LIMIT,
+        usedToday: 0,
+        remaining: DAILY_UPLOAD_LIMIT,
+      }).success,
+    ).toBe(true);
+    expect(
+      GetQuotaResponseSchema.safeParse({
+        dailyUploadLimit: DAILY_UPLOAD_LIMIT,
+        usedToday: DAILY_UPLOAD_LIMIT,
+        remaining: -1,
+      }).success,
+    ).toBe(false);
   });
 
   test("PresignedUpload shape", () => {

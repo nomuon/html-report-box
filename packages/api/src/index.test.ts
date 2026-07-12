@@ -390,6 +390,36 @@ test("daily upload quota → 429 rate_limited", async () => {
   expect((await call(env.app, "POST", "/reports", { user: "bob", body })).status).toBe(201);
 });
 
+test("GET /me/quota returns the remaining daily uploads per user", async () => {
+  const env = makeEnv({ dailyUploadLimit: 2 });
+
+  // requireAuth: unauthenticated callers get 401.
+  const unauth = await call(env.app, "GET", "/me/quota");
+  expect(unauth.status).toBe(401);
+  expect(unauth.json.error.code).toBe("unauthorized");
+
+  const fresh = await call(env.app, "GET", "/me/quota", { user: "alice" });
+  expect(fresh.status).toBe(200);
+  expect(fresh.json).toEqual({ dailyUploadLimit: 2, usedToday: 0, remaining: 2 });
+
+  const body = { title: "Quota View", kind: "html" };
+  await call(env.app, "POST", "/reports", { user: "alice", body });
+  const afterOne = await call(env.app, "GET", "/me/quota", { user: "alice" });
+  expect(afterOne.json).toEqual({ dailyUploadLimit: 2, usedToday: 1, remaining: 1 });
+
+  // 上限到達（3本目は 429）後も remaining は 0 のまま負にならない。
+  await call(env.app, "POST", "/reports", { user: "alice", body });
+  expect((await call(env.app, "POST", "/reports", { user: "alice", body })).status).toBe(429);
+  const exhausted = await call(env.app, "GET", "/me/quota", { user: "alice" });
+  expect(exhausted.json).toEqual({ dailyUploadLimit: 2, usedToday: 2, remaining: 0 });
+
+  // 読み取りは quota を消費しない & 他ユーザーは独立。
+  const again = await call(env.app, "GET", "/me/quota", { user: "alice" });
+  expect(again.json.remaining).toBe(0);
+  const bob = await call(env.app, "GET", "/me/quota", { user: "bob" });
+  expect(bob.json).toEqual({ dailyUploadLimit: 2, usedToday: 0, remaining: 2 });
+});
+
 // =====================
 // Flags (unauthenticated, rate limited per IP)
 // =====================

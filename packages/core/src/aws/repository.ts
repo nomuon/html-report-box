@@ -383,6 +383,17 @@ export class DynamoReportRepository implements ReportRepository {
     }
   }
 
+  async getDailyUploads(ownerSub: string, dateKey: string): Promise<number> {
+    const res = await this.client.send(
+      new GetCommand({
+        TableName: this.tableName,
+        Key: { pk: quotaPk(ownerSub), sk: quotaSk(dateKey) },
+      }),
+    );
+    const cnt = (res?.Item as { cnt?: unknown } | undefined)?.cnt;
+    return typeof cnt === "number" ? cnt : 0;
+  }
+
   // ---- Abuse flags ----
 
   async addFlag(id: string, flag: ReportFlag): Promise<void> {

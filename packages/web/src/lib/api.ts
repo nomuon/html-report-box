@@ -19,6 +19,7 @@ import type {
   ErrorCode,
   FlagReportResponse,
   GetConfigResponse,
+  GetQuotaResponse,
   GetReportResponse,
   GetReportSourceResponse,
   ListReportsResponse,
@@ -142,6 +143,11 @@ export class ApiClient {
 
   myReports(opts: { limit?: number; cursor?: string } = {}): Promise<MyReportsResponse> {
     return this.request("GET", "/me/reports", { query: { limit: opts.limit, cursor: opts.cursor } });
+  }
+
+  /** 日次アップロード残数（本日あと何件アップロードできるか）。 */
+  myQuota(): Promise<GetQuotaResponse> {
+    return this.request("GET", "/me/quota");
   }
 
   createReport(req: CreateReportRequestInput): Promise<CreateReportResponse> {

@@ -949,6 +949,18 @@ a.hrb-table__title:hover {
   border-color: var(--color-border);
 }
 
+/* 日次上限到達などで入力を受け付けない状態 */
+.hrb-dropzone--disabled {
+  border-style: solid;
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.hrb-dropzone--disabled .hrb-dropzone__icon {
+  background: transparent;
+  color: var(--color-text-faint);
+}
+
 /* スキャン中: 走査線がゾーンを縦にスイープする（シグネチャ演出） */
 .hrb-dropzone--scanning::before {
   content: "";
@@ -1052,6 +1064,11 @@ a.hrb-table__title:hover {
   color: var(--color-text-faint);
   text-align: center;
   margin: var(--space-4) 0 0;
+}
+
+/* 日次アップロード残数（控えめな補足行） */
+.hrb-upload-note--quota {
+  margin-top: var(--space-2);
 }
 
 .hrb-upload-form {

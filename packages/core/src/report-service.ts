@@ -167,6 +167,20 @@ export class ReportService {
     return this.repo.listByOwner(user.sub, opts);
   }
 
+  /** Daily upload quota status for the caller (GET /me/quota). */
+  async getUploadQuota(
+    user: AuthUser,
+  ): Promise<{ dailyUploadLimit: number; usedToday: number; remaining: number }> {
+    const count = await this.repo.getDailyUploads(user.sub, this.quotaDateKey());
+    // ローカルアダプタは上限超過分もカウントするため上限に丸める。
+    const usedToday = Math.min(count, this.dailyUploadLimit);
+    return {
+      dailyUploadLimit: this.dailyUploadLimit,
+      usedToday,
+      remaining: this.dailyUploadLimit - usedToday,
+    };
+  }
+
   async create(
     user: AuthUser,
     input: { title: string; description?: string; kind: ReportKind },
@@ -510,9 +524,13 @@ export class ReportService {
     if (!user.isAdmin) throw new DomainError("forbidden", "admin privileges required");
   }
 
+  /** UTC YYYY-MM-DD — increment と残数読み取りで必ず同じ境界を使う。 */
+  private quotaDateKey(): string {
+    return this.now().toISOString().slice(0, 10);
+  }
+
   private async consumeUploadQuota(user: AuthUser): Promise<void> {
-    const dateKey = this.now().toISOString().slice(0, 10);
-    const count = await this.repo.incrementDailyUploads(user.sub, dateKey);
+    const count = await this.repo.incrementDailyUploads(user.sub, this.quotaDateKey());
     if (count > this.dailyUploadLimit) {
       throw new DomainError(
         "rate_limited",

@@ -163,6 +163,10 @@ export class LocalReportRepository implements ReportRepository {
     });
   }
 
+  async getDailyUploads(ownerSub: string, dateKey: string): Promise<number> {
+    return this.store.get().quotas[`${ownerSub}#${dateKey}`] ?? 0;
+  }
+
   async addFlag(id: string, flag: ReportFlag): Promise<void> {
     this.store.mutate((db) => {
       (db.flags[id] ??= []).push(structuredClone(flag));

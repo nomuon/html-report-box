@@ -298,6 +298,53 @@ describe("daily upload quota", () => {
     expect(ok.report.status).toBe("private");
   });
 
+  test("getUploadQuota reflects usage and resets at the same UTC date boundary as increments", async () => {
+    // 可変クロックで日付境界を跨ぐ（increment と読み取りが同じ dateKey を使うこと）
+    let now = new Date("2026-07-12T23:50:00Z");
+    const limited = createLocalContext({
+      dataDir,
+      scanner: markerScanner,
+      dailyUploadLimit: 2,
+      now: () => now,
+    });
+    expect(await limited.service.getUploadQuota(alice)).toEqual({
+      dailyUploadLimit: 2,
+      usedToday: 0,
+      remaining: 2,
+    });
+
+    await limited.service.create(alice, { title: "1本目", kind: "html" });
+    expect(await limited.service.getUploadQuota(alice)).toEqual({
+      dailyUploadLimit: 2,
+      usedToday: 1,
+      remaining: 1,
+    });
+
+    // 上限到達 + 超過試行後も remaining は負にならない
+    await limited.service.create(alice, { title: "2本目", kind: "html" });
+    await expectDomainError(
+      limited.service.create(alice, { title: "3本目", kind: "html" }),
+      "rate_limited",
+    );
+    expect(await limited.service.getUploadQuota(alice)).toEqual({
+      dailyUploadLimit: 2,
+      usedToday: 2,
+      remaining: 0,
+    });
+    // 他ユーザーは独立
+    expect((await limited.service.getUploadQuota(bob)).remaining).toBe(2);
+
+    // UTC 日付が変わると残数が戻り、再びアップロードできる
+    now = new Date("2026-07-13T00:10:00Z");
+    expect(await limited.service.getUploadQuota(alice)).toEqual({
+      dailyUploadLimit: 2,
+      usedToday: 0,
+      remaining: 2,
+    });
+    const ok = await limited.service.create(alice, { title: "翌日の1本目", kind: "html" });
+    expect(ok.report.status).toBe("private");
+  });
+
   test("overwrite upload-url issuance and editContent also consume quota", async () => {
     const limited = createLocalContext({ dataDir, scanner: markerScanner, dailyUploadLimit: 2 });
     const { report, upload: up } = await limited.service.create(alice, { title: "上書き対象", kind: "html" });

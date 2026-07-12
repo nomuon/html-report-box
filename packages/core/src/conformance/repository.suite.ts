@@ -192,6 +192,19 @@ export function runRepositoryConformance(name: string, factory: RepositoryFactor
       expect(await repo.incrementDailyUploads("bob", "2026-07-12")).toBe(1);
     });
 
+    test("getDailyUploads reads the current count (0 when nothing was uploaded)", async () => {
+      const repo = await factory();
+      expect(await repo.getDailyUploads("alice", "2026-07-12")).toBe(0);
+      await repo.incrementDailyUploads("alice", "2026-07-12");
+      await repo.incrementDailyUploads("alice", "2026-07-12");
+      expect(await repo.getDailyUploads("alice", "2026-07-12")).toBe(2);
+      // 読み取りはカウントを消費しない。
+      expect(await repo.getDailyUploads("alice", "2026-07-12")).toBe(2);
+      // 別日・別オーナーは独立。
+      expect(await repo.getDailyUploads("alice", "2026-07-13")).toBe(0);
+      expect(await repo.getDailyUploads("bob", "2026-07-12")).toBe(0);
+    });
+
     test("flags: add/list, listFlagged surfaces flagged ids, clearFlags resolves", async () => {
       const repo = await factory();
       const flagged = rid("flg");

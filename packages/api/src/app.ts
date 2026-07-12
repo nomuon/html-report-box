@@ -257,6 +257,10 @@ export function createApp(ctx: AppContext): AppType {
     });
   });
 
+  app.get("/me/quota", requireAuth, async (c) => {
+    return c.json(await ctx.service.getUploadQuota(mustUser(c)));
+  });
+
   app.post("/reports", requireAuth, async (c) => {
     const body = parseWith(CreateReportRequestSchema, await readJson(c), "report");
     const { report, upload } = await ctx.service.create(

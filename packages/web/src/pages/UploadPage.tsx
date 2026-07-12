@@ -1,7 +1,7 @@
 /** 画面②: アップロード (`/upload`) — D&D → メタ入力 → 進捗 → 結果 */
 import { useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ScanFinding } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
@@ -46,6 +46,15 @@ export function UploadPage() {
   const [publishing, setPublishing] = useState(false);
   const fileRef = useRef<File | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // 日次アップロード残数（本日あと何件アップロードできるか）
+  const quotaQuery = useQuery({
+    queryKey: ["my-quota"],
+    queryFn: () => api.myQuota(),
+    enabled: session !== null,
+  });
+  const quota = quotaQuery.data;
+  const quotaExhausted = quota !== undefined && quota.remaining <= 0;
 
   if (!session) {
     return (
@@ -131,6 +140,8 @@ export function UploadPage() {
         toast.push("danger", "アップロード処理に失敗しました。時間をおいて再試行してください");
       }
     } finally {
+      // quota は create 時点で消費されるため、成否によらず残数を取り直す
+      void queryClient.invalidateQueries({ queryKey: ["my-quota"] });
       abortRef.current = null;
       setBusy(false);
     }
@@ -238,11 +249,29 @@ export function UploadPage() {
           onFiles={(f) => void handleFiles(f)}
           onCancelUpload={() => abortRef.current?.abort()}
           resultContent={resultContent}
+          disabledContent={
+            quotaExhausted && quota !== undefined ? (
+              <>
+                <div className="hrb-dropzone__icon" aria-hidden="true">
+                  <Icon name="ban" size={28} />
+                </div>
+                <p className="hrb-dropzone__lead">
+                  本日の上限（{quota.dailyUploadLimit}件）に達しました
+                </p>
+                <p className="hrb-dropzone__note">明日また利用できます</p>
+              </>
+            ) : undefined
+          }
         />
         <p className="hrb-upload-note">
           <Icon name="shield-check" size={14} />
           対応形式: HTML（単一ファイル, 最大 5MB）/ ZIP（index.html 必須, 最大 20MB）· すべてのファイルは公開前にセキュリティスキャンされます
         </p>
+        {quota !== undefined && !quotaExhausted && (
+          <p className="hrb-upload-note hrb-upload-note--quota">
+            本日あと {quota.remaining} 件アップロードできます
+          </p>
+        )}
       </div>
 
       {state.phase === "selected" && (

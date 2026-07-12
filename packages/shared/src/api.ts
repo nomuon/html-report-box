@@ -209,6 +209,17 @@ export const MyReportsResponseSchema = z.object({
 export type MyReportsResponse = z.infer<typeof MyReportsResponseSchema>;
 
 // =====================
+// GET /me/quota (auth) — 日次アップロード残数
+// =====================
+export const GetQuotaResponseSchema = z.object({
+  dailyUploadLimit: z.number().int().positive(),
+  /** 本日消費した件数（上限で頭打ち）。 */
+  usedToday: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+});
+export type GetQuotaResponse = z.infer<typeof GetQuotaResponseSchema>;
+
+// =====================
 // POST /reports (auth) — create META (status=private) + issue presigned POST
 // =====================
 export const CreateReportRequestSchema = z.object({

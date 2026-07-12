@@ -269,6 +269,18 @@ describe("daily upload quota (conditional counter)", () => {
     const [input] = client.inputsOf("UpdateCommand");
     expect(input.ExpressionAttributeValues[":limit"]).toBe(5);
   });
+
+  test("getDailyUploads reads the counter item, 0 when absent", async () => {
+    const empty = new FakeClient();
+    expect(await repo(empty).getDailyUploads("user-1", "2026-07-10")).toBe(0);
+    const [input] = empty.inputsOf("GetCommand");
+    expect(input.Key).toEqual({ pk: quotaPk("user-1"), sk: quotaSk("2026-07-10") });
+
+    const client = new FakeClient().on("GetCommand", () => ({
+      Item: { pk: quotaPk("user-1"), sk: quotaSk("2026-07-10"), cnt: 7 },
+    }));
+    expect(await repo(client).getDailyUploads("user-1", "2026-07-10")).toBe(7);
+  });
 });
 
 describe("delete / flags", () => {

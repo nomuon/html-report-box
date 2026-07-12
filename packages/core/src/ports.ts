@@ -85,6 +85,8 @@ export interface ReportRepository {
   clearPendingUpload(id: string): Promise<void>;
   /** Returns the post-increment upload count for ownerSub on dateKey (UTC YYYY-MM-DD). */
   incrementDailyUploads(ownerSub: string, dateKey: string): Promise<number>;
+  /** Current upload count for ownerSub on dateKey (0 when nothing was uploaded). */
+  getDailyUploads(ownerSub: string, dateKey: string): Promise<number>;
   addFlag(id: string, flag: ReportFlag): Promise<void>;
   listFlags(id: string): Promise<ReportFlag[]>;
   /** Every report id that currently has at least one flag (admin 通報一覧). */
