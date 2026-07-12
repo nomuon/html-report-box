@@ -12,11 +12,7 @@
   "dependencies": {
     "@hrb/core": "workspace:*",
     "@hrb/shared": "workspace:*",
-    "parse5": "^8.0.1",
-    "yauzl": "^3.4.0"
-  },
-  "devDependencies": {
-    "@types/yauzl": "^3.4.0",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "parse5": "^8.0.1"
   }
 }

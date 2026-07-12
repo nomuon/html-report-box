@@ -1,7 +1,7 @@
 /**
  * createScanner — @hrb/core SecurityScanner port implementation.
  * HTML uploads: one parse5 pass into ScanContext, consumed by every rule.
- * Zip uploads: guarded extraction (yauzl), then recursive scanning of
+ * Zip uploads: guarded extraction (fflate), then recursive scanning of
  * html/htm/svg/js/mjs entries + per-entry MIME sniffs. Portable (Node 22).
  */
 import type { ScanFinding, ScanVerdict } from "@hrb/shared";

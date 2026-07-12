@@ -1,7 +1,7 @@
 /**
  * @hrb/scanner — AWS-independent static analysis (pass / warn / block).
  * parse5-based ScanContext + pluggable Rule files, plus the guarded
- * ZipExtractor (yauzl). Implements the SecurityScanner / ZipExtractor
+ * ZipExtractor (fflate). Implements the SecurityScanner / ZipExtractor
  * ports from @hrb/core. Portable (Node 22 compatible, no Bun-only APIs).
  */
 export const PACKAGE_NAME = "@hrb/scanner";
