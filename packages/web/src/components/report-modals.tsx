@@ -145,7 +145,7 @@ export function EditHtmlModal({
       } else {
         toast.push(
           "success",
-          result.report.status === "published"
+          result.report.status === "published" || result.report.status === "unlisted"
             ? "保存しました。公開中の内容を更新しました"
             : "保存しました（非公開のまま）",
         );
@@ -360,7 +360,7 @@ export function OverwriteReportModal({
         </div>
         <h2 className="hrb-upload-result__title">上書きが完了しました</h2>
         <p className="hrb-upload-result__body">
-          {state.report.status === "published"
+          {state.report.status === "published" || state.report.status === "unlisted"
             ? "公開中の内容を新しいファイルで更新しました"
             : "このレポートは非公開のままです。公開トグルでいつでも公開できます"}
         </p>

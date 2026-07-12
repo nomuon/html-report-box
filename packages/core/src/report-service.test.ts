@@ -460,8 +460,8 @@ describe("view counts (閲覧数)", () => {
     await ctx.service.get(report.id, bob);
 
     expect((await ctx.service.get(report.id, alice)).viewCount).toBe(1);
-    // admin はオーナーではないので閲覧としてカウントされつつ、値も見える
-    expect((await ctx.service.get(report.id, admin)).viewCount).toBe(2);
+    // admin のモデレーション閲覧はカウントされない（値は見える）
+    expect((await ctx.service.get(report.id, admin)).viewCount).toBe(1);
     expect((await ctx.service.get(report.id, bob)).viewCount).toBeUndefined();
     expect((await ctx.service.get(report.id)).viewCount).toBeUndefined();
   });

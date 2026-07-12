@@ -171,8 +171,11 @@ describe("ReportTagsSchema (タグ正規化)", () => {
     const ten = Array.from({ length: REPORT_TAGS_MAX }, (_, i) => `t${i}`);
     expect(ReportTagsSchema.parse(ten)).toEqual(ten);
     expect(ReportTagsSchema.safeParse([...ten, "over"]).success).toBe(false);
-    // 上限判定は正規化（重複除去）後に行われる
-    expect(ReportTagsSchema.parse([...ten, "t0"])).toEqual(ten);
+    // 上限判定は正規化（重複除去）前の raw 配列長で行われる（MCP 入力と同じ規約）
+    expect(ReportTagsSchema.safeParse([...ten, "t0"]).success).toBe(false);
+    expect(ReportTagsSchema.parse([...ten.slice(0, REPORT_TAGS_MAX - 1), "t0"])).toEqual(
+      ten.slice(0, REPORT_TAGS_MAX - 1),
+    );
   });
 
   test("trim 前が31文字でも trim 後30文字以内なら通る", () => {

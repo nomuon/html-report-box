@@ -134,16 +134,16 @@ export function buildMcpServer(ctx: McpContext, auth: McpAuth = { user: null }):
     async ({ id }) =>
       runTool(async () => {
         // Anonymous → published only; per-user key → owner's own reports too.
-        const { report, url } = await reportService.get(id, user);
+        // Programmatic read: never bump the human view counter.
+        const { report, url } = await reportService.get(id, user, { countView: false });
         const raw = await objectStorage.getContentObject(EXTRACTED_TEXT_KEY(id));
         const fullText = raw ? new TextDecoder().decode(raw) : "";
         const truncated = fullText.length > MAX_EXTRACTED_TEXT_CHARS;
         return jsonResult({
+          // Content URL only exists while actually served (published /
+          // unlisted and not expired) — the service omits it otherwise.
           report: toPublicReport(report),
-          // Content URL only exists while served (published / unlisted).
-          ...(report.status === "published" || report.status === "unlisted"
-            ? { url: url ?? reportService.contentUrl(id) }
-            : {}),
+          ...(url !== undefined ? { url } : {}),
           appUrl: appUrl(id),
           extractedText: truncated ? fullText.slice(0, MAX_EXTRACTED_TEXT_CHARS) : fullText,
           extractedTextTruncated: truncated,

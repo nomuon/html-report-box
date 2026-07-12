@@ -125,12 +125,15 @@ export class ReportService {
   /**
    * Visibility: published / unlisted → anyone; otherwise owner or admin only
    * (non-visible reports surface as not_found, never as forbidden).
-   * Publicly served reads by anyone but the owner bump the view counter
-   * (best-effort); viewCount is returned to the owner / admin only.
+   * Publicly served reads by anyone but the owner / admin bump the view
+   * counter (best-effort; opt out with countView: false for read paths that
+   * are not human views, e.g. MCP); viewCount is returned to the owner /
+   * admin only.
    */
   async get(
     id: string,
     viewer?: AuthUser | null,
+    opts?: { countView?: boolean },
   ): Promise<{ report: ReportMeta; url?: string; isOwner: boolean; viewCount?: number }> {
     const meta = await this.repo.get(id);
     if (!meta) throw new DomainError("not_found", "report not found");
@@ -142,7 +145,7 @@ export class ReportService {
     const served = this.isPubliclyServed(meta.status) && !this.isExpired(meta);
     const visible = served || isOwner || isAdmin;
     if (!visible) throw new DomainError("not_found", "report not found");
-    if (served && !isOwner) {
+    if (served && !isOwner && !isAdmin && (opts?.countView ?? true)) {
       // ベストエフォート: カウンタ障害で閲覧自体を妨げない。
       await this.repo.incrementViewCount(id).catch(() => {});
     }

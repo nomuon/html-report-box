@@ -78,10 +78,12 @@ export const ReportDescriptionSchema = z.string().trim().max(REPORT_DESCRIPTION_
 
 /**
  * タグ配列の正規化: 各タグを trim → 空文字を除外 → 重複を除去。
- * 各タグは最大 REPORT_TAG_MAX 文字、正規化後は最大 REPORT_TAGS_MAX 個。
+ * 各タグは最大 REPORT_TAG_MAX 文字、入力配列は最大 REPORT_TAGS_MAX 個
+ * （上限は正規化前の raw 配列長で判定 — MCP 側の入力スキーマと同じ規約）。
  */
 export const ReportTagsSchema = z
   .array(z.string().trim().max(REPORT_TAG_MAX))
+  .max(REPORT_TAGS_MAX, { message: `at most ${REPORT_TAGS_MAX} tags are allowed` })
   .transform((tags) => {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -91,9 +93,6 @@ export const ReportTagsSchema = z
       out.push(tag);
     }
     return out;
-  })
-  .refine((tags) => tags.length <= REPORT_TAGS_MAX, {
-    message: `at most ${REPORT_TAGS_MAX} tags are allowed`,
   });
 
 // ---- Full report metadata (internal record; DynamoDB META item shape) ----
