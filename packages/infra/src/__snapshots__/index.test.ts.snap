@@ -516,6 +516,18 @@ exports[`template snapshots HrbStatefulStack 1`] = `
             },
           ],
         },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "ExpiredObjectDeleteMarker": true,
+              "Id": "expire-noncurrent-30d",
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 30,
+              },
+              "Status": "Enabled",
+            },
+          ],
+        },
         "PublicAccessBlockConfiguration": {
           "BlockPublicAcls": true,
           "BlockPublicPolicy": true,

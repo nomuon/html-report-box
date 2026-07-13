@@ -88,11 +88,20 @@ export class HrbStatefulStack extends Stack {
     });
 
     // Published report content: reports/<id>/... (Distribution B origin).
-    // Versioned for audit / takedown forensics.
+    // Versioned for audit / takedown forensics. Deletes from the app only
+    // place delete markers, so noncurrent versions must expire via lifecycle
+    // or purged reports would consume storage forever.
     this.contentBucket = new s3.Bucket(this, "ContentBucket", {
       ...bucketDefaults,
       versioned: true,
       removalPolicy: RemovalPolicy.RETAIN,
+      lifecycleRules: [
+        {
+          id: "expire-noncurrent-30d",
+          noncurrentVersionExpiration: Duration.days(30),
+          expiredObjectDeleteMarker: true,
+        },
+      ],
     });
 
     // Staging: presigned-POST target. staging/* expires in 1 day,
