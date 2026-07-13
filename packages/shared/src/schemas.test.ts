@@ -5,7 +5,6 @@ import {
   ALLOWED_FONT_HOSTS,
   CompleteReportRequestSchema,
   CreateReportRequestSchema,
-  DAILY_UPLOAD_LIMIT,
   ErrorResponseSchema,
   FlagReportRequestSchema,
   GetConfigResponseSchema,
@@ -281,7 +280,7 @@ describe("API response schemas", () => {
         maxZipSizeBytes: MAX_ZIP_SIZE_BYTES,
         maxZipUncompressedBytes: MAX_ZIP_UNCOMPRESSED_BYTES,
         maxZipEntries: MAX_ZIP_ENTRIES,
-        dailyUploadLimit: DAILY_UPLOAD_LIMIT,
+        dailyUploadLimit: null,
       },
     };
     expect(
@@ -308,18 +307,28 @@ describe("API response schemas", () => {
   test("GetQuotaResponse: usedToday/remaining are nonnegative", () => {
     expect(
       GetQuotaResponseSchema.safeParse({
-        dailyUploadLimit: DAILY_UPLOAD_LIMIT,
+        dailyUploadLimit: 30,
         usedToday: 0,
-        remaining: DAILY_UPLOAD_LIMIT,
+        remaining: 30,
       }).success,
     ).toBe(true);
     expect(
       GetQuotaResponseSchema.safeParse({
-        dailyUploadLimit: DAILY_UPLOAD_LIMIT,
-        usedToday: DAILY_UPLOAD_LIMIT,
+        dailyUploadLimit: 30,
+        usedToday: 30,
         remaining: -1,
       }).success,
     ).toBe(false);
+  });
+
+  test("GetQuotaResponse: 無制限（null）を受理する", () => {
+    expect(
+      GetQuotaResponseSchema.safeParse({
+        dailyUploadLimit: null,
+        usedToday: 42,
+        remaining: null,
+      }).success,
+    ).toBe(true);
   });
 
   test("PresignedUpload shape", () => {
@@ -400,7 +409,6 @@ describe("constants", () => {
     expect(MAX_ZIP_SIZE_BYTES).toBe(20 * 1024 * 1024);
     expect(MAX_ZIP_UNCOMPRESSED_BYTES).toBe(100 * 1024 * 1024);
     expect(MAX_ZIP_ENTRIES).toBe(200);
-    expect(DAILY_UPLOAD_LIMIT).toBe(30);
   });
 
   test("zip entry extension allowlist", () => {

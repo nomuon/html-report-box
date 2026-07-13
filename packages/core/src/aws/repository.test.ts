@@ -281,17 +281,28 @@ describe("tokens / pending upload", () => {
 describe("daily upload quota (conditional counter)", () => {
   test("increments atomically with the limit in the condition expression", async () => {
     const client = new FakeClient().on("UpdateCommand", () => ({ Attributes: { cnt: 3 } }));
-    const count = await repo(client).incrementDailyUploads("user-1", "2026-07-10");
+    const count = await repo(client, 30).incrementDailyUploads("user-1", "2026-07-10");
     expect(count).toBe(3);
     const [input] = client.inputsOf("UpdateCommand");
     expect(input.Key).toEqual({ pk: quotaPk("user-1"), sk: quotaSk("2026-07-10") });
     expect(input.UpdateExpression).toContain("ADD #c :one");
     expect(input.ConditionExpression).toBe("attribute_not_exists(#c) OR #c < :limit");
     expect(input.ExpressionAttributeNames).toEqual({ "#c": "cnt" });
-    expect(input.ExpressionAttributeValues[":limit"]).toBe(30); // DAILY_UPLOAD_LIMIT
+    expect(input.ExpressionAttributeValues[":limit"]).toBe(30);
     expect(input.ExpressionAttributeValues[":one"]).toBe(1);
     expect(typeof input.ExpressionAttributeValues[":ttl"]).toBe("number");
     expect(input.ReturnValues).toBe("ALL_NEW");
+  });
+
+  test("no limit configured (default) → unconditional increment", async () => {
+    const client = new FakeClient().on("UpdateCommand", () => ({ Attributes: { cnt: 31 } }));
+    const count = await repo(client).incrementDailyUploads("user-1", "2026-07-10");
+    expect(count).toBe(31);
+    const [input] = client.inputsOf("UpdateCommand");
+    expect(input.ConditionExpression).toBeUndefined();
+    expect(input.ExpressionAttributeValues[":limit"]).toBeUndefined();
+    expect(input.ExpressionAttributeValues[":one"]).toBe(1);
+    expect(typeof input.ExpressionAttributeValues[":ttl"]).toBe("number");
   });
 
   test("conditional failure means the cap was hit → returns limit+1", async () => {

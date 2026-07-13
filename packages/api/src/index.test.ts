@@ -134,8 +134,14 @@ test("GET /config returns dev auth config and limits", async () => {
   expect(res.json.contentBaseUrl).toBe(BASE);
   expect(res.json.auth.mode).toBe("dev");
   expect(res.json.auth.users).toEqual(["alice", "bob", "admin"]);
-  expect(res.json.limits.dailyUploadLimit).toBeGreaterThan(0);
+  expect(res.json.limits.dailyUploadLimit).toBeNull(); // 既定は無制限
   expect(res.json.limits.maxHtmlSizeBytes).toBeGreaterThan(0);
+});
+
+test("GET /config advertises the daily upload limit when configured", async () => {
+  const env = makeEnv({ dailyUploadLimit: 5 });
+  const res = await call(env.app, "GET", "/config");
+  expect(res.json.limits.dailyUploadLimit).toBe(5);
 });
 
 // =====================
@@ -732,6 +738,17 @@ test("daily upload quota → 429 rate_limited", async () => {
   expect(third.json.error.code).toBe("rate_limited");
   // Other users have their own quota.
   expect((await call(env.app, "POST", "/reports", { user: "bob", body })).status).toBe(201);
+});
+
+test("既定（上限未設定）はアップロードが制限されず quota は無制限を返す", async () => {
+  const env = makeEnv();
+  const body = { title: "Unlimited", kind: "html" };
+  for (let i = 0; i < 5; i++) {
+    expect((await call(env.app, "POST", "/reports", { user: "alice", body })).status).toBe(201);
+  }
+  const quota = await call(env.app, "GET", "/me/quota", { user: "alice" });
+  expect(quota.status).toBe(200);
+  expect(quota.json).toEqual({ dailyUploadLimit: null, usedToday: 5, remaining: null });
 });
 
 test("GET /me/quota returns the remaining daily uploads per user", async () => {

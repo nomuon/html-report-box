@@ -151,7 +151,8 @@ export const GetConfigResponseSchema = z.object({
     maxZipSizeBytes: z.number().int().positive(),
     maxZipUncompressedBytes: z.number().int().positive(),
     maxZipEntries: z.number().int().positive(),
-    dailyUploadLimit: z.number().int().positive(),
+    /** null = 無制限（HRB_DAILY_UPLOAD_LIMIT 未設定時の既定）。 */
+    dailyUploadLimit: z.number().int().positive().nullable(),
   }),
 });
 export type GetConfigResponse = z.infer<typeof GetConfigResponseSchema>;
@@ -236,10 +237,12 @@ export type MyReportsResponse = z.infer<typeof MyReportsResponseSchema>;
 // GET /me/quota (auth) — 日次アップロード残数
 // =====================
 export const GetQuotaResponseSchema = z.object({
-  dailyUploadLimit: z.number().int().positive(),
-  /** 本日消費した件数（上限で頭打ち）。 */
+  /** null = 無制限。 */
+  dailyUploadLimit: z.number().int().positive().nullable(),
+  /** 本日消費した件数（上限がある場合はその値で頭打ち）。 */
   usedToday: z.number().int().nonnegative(),
-  remaining: z.number().int().nonnegative(),
+  /** 本日の残数。null = 無制限。 */
+  remaining: z.number().int().nonnegative().nullable(),
 });
 export type GetQuotaResponse = z.infer<typeof GetQuotaResponseSchema>;
 

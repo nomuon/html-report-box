@@ -30,6 +30,7 @@ const ctx = createLocalContext({
   contentBaseUrl: config.contentOrigin,
   scanner: createScanner({ domainReputation: new StubDomainReputation() }),
   zipExtractor: createZipExtractor(),
+  dailyUploadLimit: config.dailyUploadLimit,
   ...(config.googleAuth
     ? {
         googleAuth: {
@@ -47,6 +48,7 @@ const app = createApp({
   apiKeys: ctx.apiKeys,
   userAdmin: ctx.userAdmin,
   contentBaseUrl: config.contentOrigin,
+  dailyUploadLimit: config.dailyUploadLimit,
 });
 
 const mcpRoot = new Hono();
@@ -156,6 +158,13 @@ console.log(
     : `${tag}   auth     : dev users via x-dev-user: alice | bob | admin`,
 );
 console.log(`${tag}   scanner  : @hrb/scanner (StubDomainReputation) + zip extractor`);
+console.log(
+  `${tag}   quota    : ${
+    config.dailyUploadLimit === null
+      ? "無制限（HRB_DAILY_UPLOAD_LIMIT で日次上限を設定可能）"
+      : `${config.dailyUploadLimit} 件/ユーザー/日 (HRB_DAILY_UPLOAD_LIMIT)`
+  }`,
+);
 console.log(
   `${tag}   mcp      : POST ${config.appOrigin}/mcp${
     config.mcpApiKey

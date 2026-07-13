@@ -9,7 +9,6 @@
 import { createHash } from "node:crypto";
 import {
   CreateReportRequestSchema,
-  DAILY_UPLOAD_LIMIT,
   MAX_HTML_SIZE_BYTES,
   MAX_ZIP_SIZE_BYTES,
   REPORT_DESCRIPTION_MAX,
@@ -63,7 +62,8 @@ export interface ReportServiceDeps {
   zipExtractor?: ZipExtractor;
   /** Origin serving uploaded content, e.g. http://localhost:3000 (no trailing slash). */
   contentBaseUrl: string;
-  dailyUploadLimit?: number;
+  /** null / 省略 = 無制限（既定）。数値を渡した場合のみ日次上限を enforce する。 */
+  dailyUploadLimit?: number | null;
   presignedExpirySeconds?: number;
   now?: () => Date;
   newId?: () => string;
@@ -88,7 +88,7 @@ export class ReportService {
   private readonly cdn: CdnInvalidator;
   private readonly zipExtractor: ZipExtractor | undefined;
   private readonly contentBaseUrl: string;
-  private readonly dailyUploadLimit: number;
+  private readonly dailyUploadLimit: number | null;
   private readonly presignedExpirySeconds: number;
   private readonly now: () => Date;
   private readonly newId: () => string;
@@ -101,7 +101,7 @@ export class ReportService {
     this.cdn = deps.cdn;
     this.zipExtractor = deps.zipExtractor;
     this.contentBaseUrl = deps.contentBaseUrl.replace(/\/+$/, "");
-    this.dailyUploadLimit = deps.dailyUploadLimit ?? DAILY_UPLOAD_LIMIT;
+    this.dailyUploadLimit = deps.dailyUploadLimit ?? null;
     this.presignedExpirySeconds = deps.presignedExpirySeconds ?? 900;
     this.now = deps.now ?? (() => new Date());
     this.newId = deps.newId ?? (() => generateId());
@@ -222,11 +222,14 @@ export class ReportService {
     return { items, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) };
   }
 
-  /** Daily upload quota status for the caller (GET /me/quota). */
+  /** Daily upload quota status for the caller (GET /me/quota). limit null = 無制限。 */
   async getUploadQuota(
     user: AuthUser,
-  ): Promise<{ dailyUploadLimit: number; usedToday: number; remaining: number }> {
+  ): Promise<{ dailyUploadLimit: number | null; usedToday: number; remaining: number | null }> {
     const count = await this.repo.getDailyUploads(user.sub, this.quotaDateKey());
+    if (this.dailyUploadLimit === null) {
+      return { dailyUploadLimit: null, usedToday: count, remaining: null };
+    }
     // ローカルアダプタは上限超過分もカウントするため上限に丸める。
     const usedToday = Math.min(count, this.dailyUploadLimit);
     return {
@@ -778,8 +781,9 @@ export class ReportService {
   }
 
   private async consumeUploadQuota(user: AuthUser): Promise<void> {
+    // 無制限でもカウントは進める（usedToday 表示と、後から上限を設定した際の即時反映のため）。
     const count = await this.repo.incrementDailyUploads(user.sub, this.quotaDateKey());
-    if (count > this.dailyUploadLimit) {
+    if (this.dailyUploadLimit !== null && count > this.dailyUploadLimit) {
       throw new DomainError(
         "rate_limited",
         `daily upload limit (${this.dailyUploadLimit}) exceeded`,

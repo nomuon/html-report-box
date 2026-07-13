@@ -77,7 +77,8 @@ export interface AwsContextOptions {
   /** Wire @hrb/scanner here; defaults to a fail-closed scanner. */
   scanner?: SecurityScanner;
   zipExtractor?: ZipExtractor;
-  dailyUploadLimit?: number;
+  /** null / 省略 = 無制限（既定）。 */
+  dailyUploadLimit?: number | null;
   presignedExpirySeconds?: number;
   now?: () => Date;
   newId?: () => string;
@@ -108,7 +109,7 @@ export interface AwsContext {
   service: ReportService;
   /** Convenience passthroughs matching @hrb/api's AppContext. */
   contentBaseUrl: string;
-  dailyUploadLimit?: number;
+  dailyUploadLimit?: number | null;
 }
 
 function requireEnv(env: AwsEnv, name: keyof AwsEnv & string): string {

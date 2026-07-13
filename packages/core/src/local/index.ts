@@ -36,7 +36,8 @@ export interface LocalContextOptions {
   /** Replace the pass-through scanner (e.g. with @hrb/scanner). */
   scanner?: SecurityScanner;
   zipExtractor?: ZipExtractor;
-  dailyUploadLimit?: number;
+  /** null / 省略 = 無制限（既定）。 */
+  dailyUploadLimit?: number | null;
   now?: () => Date;
   newId?: () => string;
   /**

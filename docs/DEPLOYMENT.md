@@ -26,6 +26,7 @@ Bun は `.env` を自動ロードする（dotenv 不要）。
 | `HRB_APP_ORIGIN` | 不使用 | **必須** https オリジン（例 `https://reports.example.com`） |
 | `HRB_CONTENT_ORIGIN` | 不使用 | **必須** https オリジン・**app と別ホスト名** |
 | `MCP_API_KEY` | 任意（設定時のみ /mcp 認証） | **必須** 32 文字以上（`openssl rand -base64 32`） |
+| `HRB_DAILY_UPLOAD_LIMIT` | 任意（未設定 = 無制限） | 任意（正の整数。設定時のみユーザーあたりの日次アップロード上限を enforce） |
 
 ## dev（手元開発）
 

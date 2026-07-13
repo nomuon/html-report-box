@@ -154,7 +154,7 @@ claude mcp add --transport http hrb http://localhost:3000/mcp
 
 書き込みツール（per-user キー必須。未認証はツール応答でエラー）:
 
-- `upload_report { title, description?, html }` … HTML 1 枚を直接アップロード（presigned 不要の内部フロー）。セキュリティスキャンは必ず実行され、pass/warn → private、block → rejected。日次アップロード上限も通常どおり消費
+- `upload_report { title, description?, html }` … HTML 1 枚を直接アップロード（presigned 不要の内部フロー）。セキュリティスキャンは必ず実行され、pass/warn → private、block → rejected。日次アップロード上限（`HRB_DAILY_UPLOAD_LIMIT` 設定時のみ。既定は無制限）も通常どおり消費
 - `publish_report { id }` … 自分の private レポートを公開し shareUrl（`/reports/:id`）を返す
 - `unpublish_report { id }` … 公開を取り下げて private に戻す
 

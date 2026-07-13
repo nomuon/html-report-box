@@ -18,7 +18,6 @@ import {
   CreateApiKeyRequestSchema,
   CreateReportRequestSchema,
   CreateUploadUrlRequestSchema,
-  DAILY_UPLOAD_LIMIT,
   MAX_API_KEYS_PER_USER,
   FlagReportRequestSchema,
   GoogleLoginRequestSchema,
@@ -57,8 +56,8 @@ export interface AppContext {
   userAdmin: UserAdmin;
   /** Origin serving uploaded content, e.g. http://localhost:3000 (GET /config). */
   contentBaseUrl: string;
-  /** Advertised in GET /config; must match what the ReportService enforces. */
-  dailyUploadLimit?: number;
+  /** Advertised in GET /config; must match what the ReportService enforces. null / 省略 = 無制限。 */
+  dailyUploadLimit?: number | null;
   /** Rate limiter for POST /reports/:id/flag (defaults to in-memory per-IP). */
   flagLimiter?: RateLimiter;
   /**
@@ -190,7 +189,7 @@ export function createApp(ctx: AppContext): AppType {
         maxZipSizeBytes: MAX_ZIP_SIZE_BYTES,
         maxZipUncompressedBytes: MAX_ZIP_UNCOMPRESSED_BYTES,
         maxZipEntries: MAX_ZIP_ENTRIES,
-        dailyUploadLimit: ctx.dailyUploadLimit ?? DAILY_UPLOAD_LIMIT,
+        dailyUploadLimit: ctx.dailyUploadLimit ?? null,
       },
     };
     return c.json(config);

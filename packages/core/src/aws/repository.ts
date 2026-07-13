@@ -24,7 +24,6 @@ import {
   ScanCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { DAILY_UPLOAD_LIMIT } from "@hrb/shared";
 import type { ReportMeta, ReportStatus } from "@hrb/shared";
 import { DomainError } from "../errors.ts";
 import type { Page, PageOptions, PublishedListOptions, ReportFlag, ReportRepository } from "../ports.ts";
@@ -97,8 +96,8 @@ export function itemToMeta(item: Record<string, unknown>): ReportMeta {
 export interface DynamoReportRepositoryOptions {
   client: CommandClient;
   tableName: string;
-  /** Enforced in the quota counter's condition expression. */
-  dailyUploadLimit?: number;
+  /** Enforced in the quota counter's condition expression. null / 省略 = 無制限（既定）。 */
+  dailyUploadLimit?: number | null;
   /** Flag sort-key uniqueness suffix (injectable for tests). */
   newSuffix?: () => string;
 }
@@ -106,13 +105,13 @@ export interface DynamoReportRepositoryOptions {
 export class DynamoReportRepository implements ReportRepository {
   private readonly client: CommandClient;
   private readonly tableName: string;
-  private readonly dailyUploadLimit: number;
+  private readonly dailyUploadLimit: number | null;
   private readonly newSuffix: () => string;
 
   constructor(options: DynamoReportRepositoryOptions) {
     this.client = options.client;
     this.tableName = options.tableName;
-    this.dailyUploadLimit = options.dailyUploadLimit ?? DAILY_UPLOAD_LIMIT;
+    this.dailyUploadLimit = options.dailyUploadLimit ?? null;
     this.newSuffix = options.newSuffix ?? (() => randomUUID());
   }
 
@@ -378,33 +377,36 @@ export class DynamoReportRepository implements ReportRepository {
   // ---- Daily upload quota ----
 
   /**
-   * Atomic counter with a condition expression capping the count at the
-   * daily limit — a concurrent burst can never exceed it. When the condition
-   * fails the caller sees `limit + 1`, which ReportService maps to
-   * rate_limited.
+   * Atomic counter. With a limit configured, a condition expression caps the
+   * count at the daily limit — a concurrent burst can never exceed it. When
+   * the condition fails the caller sees `limit + 1`, which ReportService maps
+   * to rate_limited. With no limit (null) the increment is unconditional.
    */
   async incrementDailyUploads(ownerSub: string, dateKey: string): Promise<number> {
     const expiresAt = Math.floor(Date.parse(`${dateKey}T00:00:00Z`) / 1000) + QUOTA_TTL_SECONDS;
+    const limit = this.dailyUploadLimit;
     try {
       const res = await this.client.send(
         new UpdateCommand({
           TableName: this.tableName,
           Key: { pk: quotaPk(ownerSub), sk: quotaSk(dateKey) },
           UpdateExpression: "SET expiresAt = if_not_exists(expiresAt, :ttl) ADD #c :one",
-          ConditionExpression: "attribute_not_exists(#c) OR #c < :limit",
+          ...(limit !== null
+            ? {
+                ConditionExpression: "attribute_not_exists(#c) OR #c < :limit",
+                ExpressionAttributeValues: { ":one": 1, ":ttl": expiresAt, ":limit": limit },
+              }
+            : { ExpressionAttributeValues: { ":one": 1, ":ttl": expiresAt } }),
           ExpressionAttributeNames: { "#c": "cnt" },
-          ExpressionAttributeValues: {
-            ":one": 1,
-            ":ttl": expiresAt,
-            ":limit": this.dailyUploadLimit,
-          },
           ReturnValues: "ALL_NEW",
         }),
       );
       const cnt = (res?.Attributes as { cnt?: unknown } | undefined)?.cnt;
-      return typeof cnt === "number" ? cnt : this.dailyUploadLimit + 1;
+      if (typeof cnt === "number") return cnt;
+      // ReturnValues=ALL_NEW で cnt が欠けるのは異常系。上限があれば超過扱いに倒す。
+      return limit !== null ? limit + 1 : 0;
     } catch (err) {
-      if (isConditionalCheckFailed(err)) return this.dailyUploadLimit + 1;
+      if (limit !== null && isConditionalCheckFailed(err)) return limit + 1;
       throw err;
     }
   }

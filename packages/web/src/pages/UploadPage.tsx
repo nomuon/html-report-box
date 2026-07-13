@@ -43,7 +43,8 @@ export function UploadPage() {
     enabled: session !== null,
   });
   const quota = quotaQuery.data;
-  const quotaExhausted = quota !== undefined && quota.remaining <= 0;
+  // remaining === null は無制限（上限未設定）
+  const quotaExhausted = quota !== undefined && quota.remaining !== null && quota.remaining <= 0;
 
   if (!session) {
     return (
@@ -258,7 +259,7 @@ export function UploadPage() {
           <Icon name="shield-check" size={14} />
           対応形式: HTML（単一ファイル, 最大 5MB）/ ZIP（index.html 必須, 最大 20MB）· すべてのファイルは公開前にセキュリティスキャンされます
         </p>
-        {quota !== undefined && !quotaExhausted && (
+        {quota !== undefined && quota.remaining !== null && !quotaExhausted && (
           <p className="hrb-upload-note hrb-upload-note--quota">
             本日あと {quota.remaining} 件アップロードできます
           </p>
