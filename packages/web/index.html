@@ -6,7 +6,8 @@
     <meta name="robots" content="noindex" />
     <title>HTML Report Box</title>
     <script>
-      // FOUC 防止: 手動テーマ選択があれば描画前に data-theme を付与する
+      // FOUC 防止: 明示テーマ選択（light/dark）があれば描画前に data-theme を付与する。
+      // "system"（または未保存）は属性なし = CSS メディアクエリで OS 設定に追従。
       (function () {
         try {
           var t = localStorage.getItem("hrb-theme");

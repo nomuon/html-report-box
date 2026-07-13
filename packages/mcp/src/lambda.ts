@@ -16,7 +16,7 @@
 import { Hono } from "hono";
 import { handle } from "hono/aws-lambda";
 import type { LambdaEvent, LambdaContext } from "hono/aws-lambda";
-import { bearerApiKeyAuth, createMcpApp } from "./index.ts";
+import { createMcpApp } from "./index.ts";
 import type { McpContext } from "./server.ts";
 
 export interface McpLambdaOptions {
@@ -25,14 +25,15 @@ export interface McpLambdaOptions {
 }
 
 /**
- * Hono app with the API-key gate applied, serving MCP on both "/" and "/mcp"
- * (API Gateway routes the /mcp path through unchanged).
+ * Hono app serving MCP on both "/" and "/mcp" (API Gateway routes the /mcp
+ * path through unchanged). Auth is handled inside createMcpApp: the static
+ * key grants anonymous read-only access, per-user "hrb_" keys act as their
+ * owner (write tools enabled).
  */
 export function createMcpLambdaApp(ctx: McpContext, options: McpLambdaOptions = {}): Hono {
   const apiKey = options.apiKey ?? process.env.MCP_API_KEY;
   const app = new Hono();
-  app.use("*", bearerApiKeyAuth(apiKey));
-  const mcp = createMcpApp(ctx);
+  const mcp = createMcpApp(ctx, apiKey ? { staticApiKey: apiKey } : {});
   app.route("/", mcp);
   app.route("/mcp", mcp);
   return app;

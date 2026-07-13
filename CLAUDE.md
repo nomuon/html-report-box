@@ -42,7 +42,7 @@ Bun workspaces モノレポ。依存方向: `web→shared` / `api→core→share
 | `packages/core` | ドメインサービス（`ReportService`）+ ports（`src/ports.ts`）+ ローカル/AWS アダプタ |
 | `packages/scanner` | 静的セキュリティスキャナ。parse5 で 1 回パース → 1 ルール 1 ファイルのプラガブル Rule 群 + yauzl zip 検査 |
 | `packages/api` | Hono HTTP 層（`/api/*`）。`createApp(ctx)` に AppContext を注入 |
-| `packages/mcp` | リモート MCP サーバー（Streamable HTTP・ステートレス）。search / get / list の読み取り専用 3 ツール |
+| `packages/mcp` | リモート MCP サーバー（Streamable HTTP・ステートレス）。読み取り 3 ツール（search / get / list）+ per-user API キー（`hrb_`）認証の書き込み 3 ツール（upload / publish / unpublish） |
 | `packages/web` | React SPA（Bun HTML imports・react-router・TanStack Query） |
 | `packages/infra` | CDK 4 スタック: HrbEdgeStack(WAF) / HrbStatefulStack / HrbAppStack / HrbCdnStack |
 

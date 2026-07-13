@@ -26,6 +26,7 @@ function makeMeta(id: string, over: Partial<ReportMeta> = {}): ReportMeta {
     id,
     title: "タイトル",
     description: "",
+    tags: [],
     ownerSub: "user-alice",
     ownerName: "Alice",
     status: "private",
@@ -34,6 +35,7 @@ function makeMeta(id: string, over: Partial<ReportMeta> = {}): ReportMeta {
     createdAt: "2026-07-01T00:00:00.000Z",
     updatedAt: "2026-07-01T00:00:00.000Z",
     findings: [],
+    versions: [],
     ...over,
   };
 }
@@ -130,6 +132,41 @@ export function runRepositoryConformance(name: string, factory: RepositoryFactor
       expect(all.every((m) => m.status === "published")).toBe(true);
     });
 
+    test("listPublished supports order=asc and a kind filter", async () => {
+      const repo = await factory();
+      await repo.create(makeMeta(rid("k1"), { status: "published", kind: "html", updatedAt: "2026-07-01T00:00:00.000Z" }));
+      await repo.create(makeMeta(rid("k2"), { status: "published", kind: "zip", updatedAt: "2026-07-02T00:00:00.000Z" }));
+      await repo.create(makeMeta(rid("k3"), { status: "published", kind: "html", updatedAt: "2026-07-03T00:00:00.000Z" }));
+
+      // order=asc は updatedAt 昇順（古い順）。
+      const asc = await drain((opts) => repo.listPublished({ ...opts, order: "asc" }), 2);
+      expect(asc.map((m) => m.id)).toEqual([rid("k1"), rid("k2"), rid("k3")]);
+
+      // kind フィルタは指定 kind のみ返す（ページをまたいでも正確）。
+      const zipOnly = await drain((opts) => repo.listPublished({ ...opts, kind: "zip" }), 2);
+      expect(zipOnly.map((m) => m.id)).toEqual([rid("k2")]);
+
+      const htmlAsc = await drain(
+        (opts) => repo.listPublished({ ...opts, kind: "html", order: "asc" }),
+        2,
+      );
+      expect(htmlAsc.map((m) => m.id)).toEqual([rid("k1"), rid("k3")]);
+    });
+
+    test("listPublished supports a single exact tag filter", async () => {
+      const repo = await factory();
+      await repo.create(makeMeta(rid("t1"), { status: "published", tags: ["月次", "営業"], updatedAt: "2026-07-01T00:00:00.000Z" }));
+      await repo.create(makeMeta(rid("t2"), { status: "published", tags: ["週次"], updatedAt: "2026-07-02T00:00:00.000Z" }));
+      await repo.create(makeMeta(rid("t3"), { status: "published", updatedAt: "2026-07-03T00:00:00.000Z" }));
+      await repo.create(makeMeta(rid("t4"), { status: "private", tags: ["月次"], updatedAt: "2026-07-04T00:00:00.000Z" }));
+
+      const monthly = await drain((opts) => repo.listPublished({ ...opts, tag: "月次" }), 2);
+      expect(monthly.map((m) => m.id)).toEqual([rid("t1")]);
+      // 完全一致のみ（部分一致では絞り込まれない）
+      const partial = await drain((opts) => repo.listPublished({ ...opts, tag: "月" }), 2);
+      expect(partial).toEqual([]);
+    });
+
     test("listByOwner returns all statuses for one owner, newest first", async () => {
       const repo = await factory();
       await repo.create(makeMeta(rid("o1"), { ownerSub: "alice", status: "private", updatedAt: "2026-07-01T00:00:00.000Z" }));
@@ -192,6 +229,34 @@ export function runRepositoryConformance(name: string, factory: RepositoryFactor
       expect(await repo.incrementDailyUploads("bob", "2026-07-12")).toBe(1);
     });
 
+    test("getDailyUploads reads the current count (0 when nothing was uploaded)", async () => {
+      const repo = await factory();
+      expect(await repo.getDailyUploads("alice", "2026-07-12")).toBe(0);
+      await repo.incrementDailyUploads("alice", "2026-07-12");
+      await repo.incrementDailyUploads("alice", "2026-07-12");
+      expect(await repo.getDailyUploads("alice", "2026-07-12")).toBe(2);
+      // 読み取りはカウントを消費しない。
+      expect(await repo.getDailyUploads("alice", "2026-07-12")).toBe(2);
+      // 別日・別オーナーは独立。
+      expect(await repo.getDailyUploads("alice", "2026-07-13")).toBe(0);
+      expect(await repo.getDailyUploads("bob", "2026-07-12")).toBe(0);
+    });
+
+    test("view counter: increment returns the post-increment count, get reads without consuming", async () => {
+      const repo = await factory();
+      const id = rid("view");
+      await repo.create(makeMeta(id));
+
+      expect(await repo.getViewCount(id)).toBe(0);
+      expect(await repo.incrementViewCount(id)).toBe(1);
+      expect(await repo.incrementViewCount(id)).toBe(2);
+      expect(await repo.getViewCount(id)).toBe(2);
+      // 読み取りはカウントを消費しない。
+      expect(await repo.getViewCount(id)).toBe(2);
+      // 別レポートは独立。
+      expect(await repo.getViewCount(rid("other"))).toBe(0);
+    });
+
     test("flags: add/list, listFlagged surfaces flagged ids, clearFlags resolves", async () => {
       const repo = await factory();
       const flagged = rid("flg");
@@ -218,13 +283,14 @@ export function runRepositoryConformance(name: string, factory: RepositoryFactor
       expect(await repo.listFlagged()).toEqual([]);
     });
 
-    test("delete removes META along with tokens, pending pointer, and flags", async () => {
+    test("delete removes META along with tokens, pending pointer, flags, and view counter", async () => {
       const repo = await factory();
       const id = rid("del");
       await repo.create(makeMeta(id));
       await repo.putDocumentTokens(id, ["alpha"]);
       await repo.setPendingUpload(id, "staging/del/u1");
       await repo.addFlag(id, makeFlag());
+      await repo.incrementViewCount(id);
 
       await repo.delete(id);
 
@@ -233,6 +299,7 @@ export function runRepositoryConformance(name: string, factory: RepositoryFactor
       expect(await repo.getPendingUpload(id)).toBeNull();
       expect(await repo.listFlags(id)).toEqual([]);
       expect(await repo.listFlagged()).toEqual([]);
+      expect(await repo.getViewCount(id)).toBe(0);
     });
   });
 }

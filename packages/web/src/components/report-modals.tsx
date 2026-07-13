@@ -7,12 +7,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { OwnedReport, ScanFinding } from "@hrb/shared";
 import { useApp } from "../app-context.tsx";
 import { isApiError } from "../lib/api.ts";
-import { uploadToPresigned } from "../lib/upload.ts";
+import { UploadAbortedError, uploadToPresigned } from "../lib/upload.ts";
 import { DROPZONE_INITIAL, dropzoneReducer, validateFiles } from "../state/dropzone.ts";
 import { Button } from "./Button.tsx";
 import { DropZone } from "./DropZone.tsx";
+import { FindingsList } from "./FindingsList.tsx";
 import { Icon } from "./Icon.tsx";
 import { Modal } from "./Modal.tsx";
+import { TagInput } from "./TagInput.tsx";
 import { useToast } from "./Toast.tsx";
 
 function useInvalidateReports() {
@@ -32,7 +34,7 @@ export function EditReportModal({
   open,
   onClose,
 }: {
-  report: Pick<OwnedReport, "id" | "title" | "description">;
+  report: Pick<OwnedReport, "id" | "title" | "description" | "tags">;
   open: boolean;
   onClose: () => void;
 }) {
@@ -41,13 +43,14 @@ export function EditReportModal({
   const invalidate = useInvalidateReports();
   const [title, setTitle] = useState(report.title);
   const [description, setDescription] = useState(report.description);
+  const [tags, setTags] = useState<string[]>(report.tags);
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
     if (!title.trim()) return;
     setBusy(true);
     try {
-      await api.updateReport(report.id, { title: title.trim(), description: description.trim() });
+      await api.updateReport(report.id, { title: title.trim(), description: description.trim(), tags });
       invalidate(report.id);
       toast.push("success", "変更を保存しました");
       onClose();
@@ -61,7 +64,7 @@ export function EditReportModal({
   return (
     <Modal
       open={open}
-      title="タイトル・説明を編集"
+      title="タイトル・説明・タグを編集"
       onClose={onClose}
       footer={
         <>
@@ -88,6 +91,10 @@ export function EditReportModal({
           onChange={(e) => setDescription(e.target.value)}
         />
       </label>
+      <div className="hrb-field">
+        <span className="hrb-field__label">タグ</span>
+        <TagInput tags={tags} onChange={setTags} />
+      </div>
     </Modal>
   );
 }
@@ -138,7 +145,7 @@ export function EditHtmlModal({
       } else {
         toast.push(
           "success",
-          result.report.status === "published"
+          result.report.status === "published" || result.report.status === "unlisted"
             ? "保存しました。公開中の内容を更新しました"
             : "保存しました（非公開のまま）",
         );
@@ -202,13 +209,7 @@ export function EditHtmlModal({
             <div className="hrb-editor-rejected" role="alert">
               <strong>セキュリティスキャンで拒否されました。</strong>
               修正して保存し直すまでレポートは非公開の「拒否」状態になります
-              <ul className="hrb-findings">
-                {rejectedFindings.map((f, i) => (
-                  <li key={i} className="hrb-findings__item">
-                    {f.message}
-                  </li>
-                ))}
-              </ul>
+              <FindingsList findings={rejectedFindings} />
             </div>
           )}
         </>
@@ -290,6 +291,7 @@ export function OverwriteReportModal({
   const invalidate = useInvalidateReports();
   const [state, dispatch] = useReducer(dropzoneReducer, DROPZONE_INITIAL);
   const fileRef = useRef<File | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const close = () => {
     dispatch({ type: "RESET" });
@@ -311,10 +313,15 @@ export function OverwriteReportModal({
     fileRef.current = files[0] ?? null;
     dispatch({ type: "FILE_ACCEPTED", file: result.file });
     dispatch({ type: "UPLOAD_START" });
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const { upload } = await api.createUploadUrl(report.id, result.file.kind);
-      await uploadToPresigned(upload, fileRef.current!, (percent) =>
-        dispatch({ type: "PROGRESS", percent }),
+      await uploadToPresigned(
+        upload,
+        fileRef.current!,
+        (percent) => dispatch({ type: "PROGRESS", percent }),
+        controller.signal,
       );
       dispatch({ type: "UPLOADED" });
       const completed = await api.completeReport(report.id, upload.key);
@@ -328,12 +335,20 @@ export function OverwriteReportModal({
         toast.push("success", "レポートを上書きしました");
       }
     } catch (err) {
+      if (err instanceof UploadAbortedError) {
+        // 上書きのキャンセル: 既存レポートには手を付けず idle に戻すだけ
+        dispatch({ type: "RESET" });
+        toast.push("info", "アップロードをキャンセルしました");
+        return;
+      }
       dispatch({ type: "FAIL" });
       if (isApiError(err) && err.code !== "network" && err.code !== "internal") {
         toast.push("danger", err.message);
       } else {
         toast.push("danger", "アップロード処理に失敗しました。時間をおいて再試行してください");
       }
+    } finally {
+      abortRef.current = null;
     }
   };
 
@@ -345,20 +360,14 @@ export function OverwriteReportModal({
         </div>
         <h2 className="hrb-upload-result__title">上書きが完了しました</h2>
         <p className="hrb-upload-result__body">
-          {state.report.status === "published"
+          {state.report.status === "published" || state.report.status === "unlisted"
             ? "公開中の内容を新しいファイルで更新しました"
             : "このレポートは非公開のままです。公開トグルでいつでも公開できます"}
         </p>
         {state.report.verdict === "warn" && (
           <div className="hrb-upload-result__findings">
             <p className="hrb-upload-result__note">スキャンで注意項目が見つかりました:</p>
-            <ul className="hrb-findings">
-              {state.report.findings.map((f, i) => (
-                <li key={i} className="hrb-findings__item">
-                  {f.message}
-                </li>
-              ))}
-            </ul>
+            <FindingsList findings={state.report.findings} />
           </div>
         )}
         <div className="hrb-upload-result__actions">
@@ -373,13 +382,7 @@ export function OverwriteReportModal({
         <h2 className="hrb-upload-result__title hrb-upload-result__title--danger">
           アップロードを拒否しました
         </h2>
-        <ul className="hrb-findings">
-          {state.findings.map((f, i) => (
-            <li key={i} className="hrb-findings__item">
-              {f.message}
-            </li>
-          ))}
-        </ul>
+        <FindingsList findings={state.findings} />
         <div className="hrb-upload-result__actions">
           <Button variant="secondary" onClick={() => dispatch({ type: "RESET" })}>
             別のファイルを試す
@@ -404,6 +407,7 @@ export function OverwriteReportModal({
         state={state}
         dispatch={dispatch}
         onFiles={(f) => void handleFiles(f)}
+        onCancelUpload={() => abortRef.current?.abort()}
         resultContent={resultContent}
       />
       <p className="hrb-upload-note">上書きすると再スキャンが実行されます</p>

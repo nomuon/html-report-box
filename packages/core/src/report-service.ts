@@ -2,17 +2,17 @@
  * ReportService — domain logic for the report lifecycle:
  * create (META + presigned upload) → complete (validate → extract → scan →
  * private / rejected) → publish / unpublish (owner-controlled visibility) →
- * list / get / search / update / editContent / delete, plus admin takedown
- * and abuse flags (通報).
+ * list / get / search / update / editContent / delete, version history +
+ * rollback, plus admin takedown and abuse flags (通報).
  * Portable (Node 22); no Bun-only APIs.
  */
 import { createHash } from "node:crypto";
 import {
   CreateReportRequestSchema,
-  DAILY_UPLOAD_LIMIT,
   MAX_HTML_SIZE_BYTES,
   MAX_ZIP_SIZE_BYTES,
   REPORT_DESCRIPTION_MAX,
+  REPORT_VERSION_HISTORY_LIMIT,
   UpdateReportRequestSchema,
   buildDocumentTokens,
   tokenizeQuery,
@@ -21,9 +21,11 @@ import {
 import type {
   CreateReportRequest,
   PresignedUpload,
+  PublishVisibility,
   ReportKind,
   ReportMeta,
   ReportStatus,
+  ReportVersion,
   SearchResult,
   UpdateReportRequest,
 } from "@hrb/shared";
@@ -37,6 +39,7 @@ import type {
   ObjectStorage,
   Page,
   PageOptions,
+  PublishedListOptions,
   ReportFlag,
   ReportRepository,
   SearchIndex,
@@ -59,7 +62,8 @@ export interface ReportServiceDeps {
   zipExtractor?: ZipExtractor;
   /** Origin serving uploaded content, e.g. http://localhost:3000 (no trailing slash). */
   contentBaseUrl: string;
-  dailyUploadLimit?: number;
+  /** null / 省略 = 無制限（既定）。数値を渡した場合のみ日次上限を enforce する。 */
+  dailyUploadLimit?: number | null;
   presignedExpirySeconds?: number;
   now?: () => Date;
   newId?: () => string;
@@ -84,7 +88,7 @@ export class ReportService {
   private readonly cdn: CdnInvalidator;
   private readonly zipExtractor: ZipExtractor | undefined;
   private readonly contentBaseUrl: string;
-  private readonly dailyUploadLimit: number;
+  private readonly dailyUploadLimit: number | null;
   private readonly presignedExpirySeconds: number;
   private readonly now: () => Date;
   private readonly newId: () => string;
@@ -97,7 +101,7 @@ export class ReportService {
     this.cdn = deps.cdn;
     this.zipExtractor = deps.zipExtractor;
     this.contentBaseUrl = deps.contentBaseUrl.replace(/\/+$/, "");
-    this.dailyUploadLimit = deps.dailyUploadLimit ?? DAILY_UPLOAD_LIMIT;
+    this.dailyUploadLimit = deps.dailyUploadLimit ?? null;
     this.presignedExpirySeconds = deps.presignedExpirySeconds ?? 900;
     this.now = deps.now ?? (() => new Date());
     this.newId = deps.newId ?? (() => generateId());
@@ -111,37 +115,76 @@ export class ReportService {
     return `${this.contentBaseUrl}/r/${id}/`;
   }
 
-  async listPublished(opts?: PageOptions): Promise<Page<ReportMeta>> {
-    return this.repo.listPublished(opts);
+  async listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>> {
+    const page = await this.repo.listPublished(opts);
+    // 遅延失効: 期限切れはページ内から間引く（ページが limit より短くなり得る）。
+    const items = page.items.filter((meta) => !this.isExpired(meta));
+    return { items, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) };
   }
 
   /**
-   * Visibility: published → anyone; otherwise owner or admin only
+   * Visibility: published / unlisted → anyone; otherwise owner or admin only
    * (non-visible reports surface as not_found, never as forbidden).
+   * Publicly served reads by anyone but the owner / admin bump the view
+   * counter (best-effort; opt out with countView: false for read paths that
+   * are not human views, e.g. MCP); viewCount is returned to the owner /
+   * admin only.
    */
-  async get(id: string, viewer?: AuthUser | null): Promise<{ report: ReportMeta; url?: string }> {
+  async get(
+    id: string,
+    viewer?: AuthUser | null,
+    opts?: { countView?: boolean },
+  ): Promise<{ report: ReportMeta; url?: string; isOwner: boolean; viewCount?: number }> {
     const meta = await this.repo.get(id);
     if (!meta) throw new DomainError("not_found", "report not found");
-    const visible =
-      meta.status === "published" ||
-      (viewer != null && (viewer.isAdmin || viewer.sub === meta.ownerSub));
+    const isOwner = viewer != null && viewer.sub === meta.ownerSub;
+    const isAdmin = viewer?.isAdmin ?? false;
+    // 遅延失効: 期限切れは非オーナーには存在しない扱い。オーナー/admin は
+    // メタを閲覧でき（status + 過去の expiresAt で期限切れが分かる）、url は
+    // 返さない = 公開扱いしない。
+    const served = this.isPubliclyServed(meta.status) && !this.isExpired(meta);
+    const visible = served || isOwner || isAdmin;
     if (!visible) throw new DomainError("not_found", "report not found");
-    if (meta.status === "published") {
-      return { report: meta, url: this.contentUrl(id) };
+    if (served && !isOwner && !isAdmin && (opts?.countView ?? true)) {
+      // ベストエフォート: カウンタ障害で閲覧自体を妨げない。
+      await this.repo.incrementViewCount(id).catch(() => {});
     }
-    return { report: meta };
+    const viewCount = isOwner || isAdmin ? await this.repo.getViewCount(id) : undefined;
+    if (served) {
+      return {
+        report: meta,
+        url: this.contentUrl(id),
+        isOwner,
+        ...(viewCount !== undefined ? { viewCount } : {}),
+      };
+    }
+    return { report: meta, isOwner, ...(viewCount !== undefined ? { viewCount } : {}) };
   }
 
-  async search(query: string, limit = 20): Promise<SearchResult[]> {
+  /**
+   * Ranked full-text search over published reports. The full ranking is
+   * recomputed per call and paginated with an offset cursor (same style as
+   * adminListFlagged; the recompute cost is acceptable at local scale).
+   */
+  async search(
+    query: string,
+    opts?: { limit?: number; cursor?: string },
+  ): Promise<{ results: SearchResult[]; nextCursor?: string }> {
+    const limit = opts?.limit ?? 20;
+    const offset = opts?.cursor ? Number.parseInt(opts.cursor, 10) : 0;
+    if (Number.isNaN(offset) || offset < 0) {
+      throw new DomainError("bad_request", "invalid cursor");
+    }
     const tokens = tokenizeQuery(query);
-    if (tokens.length === 0) return [];
+    if (tokens.length === 0) return { results: [] };
     const hits = await this.searchIndex.query(tokens);
-    if (hits.length === 0) return [];
+    if (hits.length === 0) return { results: [] };
     const metas = await this.repo.getMany(hits.map((h) => h.reportId));
     const results: Array<SearchResult & { updatedAt: string }> = [];
     for (const hit of hits) {
       const meta = metas.get(hit.reportId);
-      if (!meta || meta.status !== "published") continue;
+      // 遅延失効: 期限切れはインデックスに残っていても結果から除外する。
+      if (!meta || meta.status !== "published" || this.isExpired(meta)) continue;
       results.push({
         report: toPublicReport(meta),
         score: hit.score,
@@ -154,20 +197,51 @@ export class ReportService {
       if (a.score !== b.score) return b.score - a.score;
       return b.updatedAt.localeCompare(a.updatedAt);
     });
-    return results.slice(0, limit).map(({ updatedAt: _u, ...rest }) => rest);
+    const page = results
+      .slice(offset, offset + limit)
+      .map(({ updatedAt: _u, ...rest }) => rest);
+    const next = offset + limit;
+    return next < results.length
+      ? { results: page, nextCursor: String(next) }
+      : { results: page };
   }
 
   // =====================
   // Owner operations
   // =====================
 
-  async listMine(user: AuthUser, opts?: PageOptions): Promise<Page<ReportMeta>> {
-    return this.repo.listByOwner(user.sub, opts);
+  /** 自分のレポート一覧。各行に累計閲覧数を付与する（マイレポートの表示用）。 */
+  async listMine(
+    user: AuthUser,
+    opts?: PageOptions,
+  ): Promise<Page<ReportMeta & { viewCount: number }>> {
+    const page = await this.repo.listByOwner(user.sub, opts);
+    const items = await Promise.all(
+      page.items.map(async (meta) => ({ ...meta, viewCount: await this.repo.getViewCount(meta.id) })),
+    );
+    return { items, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) };
+  }
+
+  /** Daily upload quota status for the caller (GET /me/quota). limit null = 無制限。 */
+  async getUploadQuota(
+    user: AuthUser,
+  ): Promise<{ dailyUploadLimit: number | null; usedToday: number; remaining: number | null }> {
+    const count = await this.repo.getDailyUploads(user.sub, this.quotaDateKey());
+    if (this.dailyUploadLimit === null) {
+      return { dailyUploadLimit: null, usedToday: count, remaining: null };
+    }
+    // ローカルアダプタは上限超過分もカウントするため上限に丸める。
+    const usedToday = Math.min(count, this.dailyUploadLimit);
+    return {
+      dailyUploadLimit: this.dailyUploadLimit,
+      usedToday,
+      remaining: this.dailyUploadLimit - usedToday,
+    };
   }
 
   async create(
     user: AuthUser,
-    input: { title: string; description?: string; kind: ReportKind },
+    input: { title: string; description?: string; tags?: string[]; kind: ReportKind },
     audit?: AuditInfo,
   ): Promise<{ report: ReportMeta; upload: PresignedUpload }> {
     const request: CreateReportRequest = parseOrThrow(CreateReportRequestSchema, input, "report");
@@ -179,6 +253,7 @@ export class ReportService {
       id,
       title: request.title,
       description: request.description,
+      tags: request.tags,
       ownerSub: user.sub,
       ownerName: user.name,
       status: "private",
@@ -187,12 +262,61 @@ export class ReportService {
       createdAt: nowIso,
       updatedAt: nowIso,
       findings: [],
+      versions: [],
       ...(audit?.sourceIp !== undefined ? { sourceIp: audit.sourceIp } : {}),
       ...(audit?.userAgent !== undefined ? { userAgent: audit.userAgent } : {}),
     };
     await this.repo.create(meta);
     const upload = await this.issuePresigned(id, request.kind);
     return { report: meta, upload };
+  }
+
+  /**
+   * One-shot HTML upload without the presigned/staging round-trip (MCP の
+   * upload_report 用): create META + ingest the bytes directly. The full scan
+   * pipeline runs exactly like a normal complete — block → rejected, pass /
+   * warn → private. Counts against the daily upload quota.
+   */
+  async createFromHtml(
+    user: AuthUser,
+    input: { title: string; description?: string; tags?: string[]; html: string },
+    audit?: AuditInfo,
+  ): Promise<{ report: ReportMeta; url?: string }> {
+    const request: CreateReportRequest = parseOrThrow(
+      CreateReportRequestSchema,
+      { title: input.title, description: input.description, tags: input.tags, kind: "html" },
+      "report",
+    );
+    const data = new TextEncoder().encode(input.html);
+    if (data.byteLength === 0) {
+      throw new DomainError("validation_failed", "html must not be empty");
+    }
+    if (data.byteLength > MAX_HTML_SIZE_BYTES) {
+      throw new DomainError("payload_too_large", `content exceeds ${MAX_HTML_SIZE_BYTES} bytes`);
+    }
+    await this.consumeUploadQuota(user);
+
+    const id = this.newId();
+    const nowIso = this.now().toISOString();
+    const meta: ReportMeta = {
+      id,
+      title: request.title,
+      description: request.description,
+      tags: request.tags,
+      ownerSub: user.sub,
+      ownerName: user.name,
+      status: "private",
+      kind: "html",
+      version: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      findings: [],
+      versions: [],
+      ...(audit?.sourceIp !== undefined ? { sourceIp: audit.sourceIp } : {}),
+      ...(audit?.userAgent !== undefined ? { userAgent: audit.userAgent } : {}),
+    };
+    await this.repo.create(meta);
+    return this.ingest(meta, data);
   }
 
   /** Presigned upload for overwriting an existing report (owner or admin). */
@@ -256,14 +380,33 @@ export class ReportService {
     return result;
   }
 
-  /** Make a private report publicly visible (owner or admin). Idempotent. */
-  async publish(user: AuthUser, id: string): Promise<{ report: ReportMeta; url: string }> {
+  /**
+   * Make a private report publicly viewable (owner or admin). Idempotent.
+   * visibility: published = 一覧・検索に表示 / unlisted = URL を知る人のみ
+   * （一覧・検索インデックスには載せない）。published⇔unlisted の切替も
+   * 再呼び出しで行う（コンテンツは配信済みなのでインデックスだけ遷移）。
+   * expiresAt: 公開の有効期限（省略時は無期限 — 既存の期限もクリアされる）。
+   * 失効後もオーナーの再 publish で期限を再設定/クリアできる。
+   */
+  async publish(
+    user: AuthUser,
+    id: string,
+    opts?: { visibility?: PublishVisibility; expiresAt?: string },
+  ): Promise<{ report: ReportMeta; url: string }> {
+    const visibility = opts?.visibility ?? "published";
+    const expiresAt = this.validateExpiresAt(opts?.expiresAt);
     const meta = await this.mustGet(id);
     this.assertOwnerOrAdmin(user, meta);
     if (meta.status === "takedown" && !user.isAdmin) {
       throw new DomainError("forbidden", "report was taken down by an administrator");
     }
-    if (meta.status === "published") {
+    if (meta.status === visibility) {
+      // 期限のみの再設定/クリア（失効後の再 publish を含む）でも META は更新する。
+      if (meta.expiresAt !== expiresAt) {
+        this.setExpiresAt(meta, expiresAt);
+        meta.updatedAt = this.now().toISOString();
+        await this.repo.update(meta);
+      }
       return { report: meta, url: this.contentUrl(id) };
     }
     if (meta.status === "rejected") {
@@ -272,19 +415,38 @@ export class ReportService {
         "report was rejected by the security scan; upload a fixed version first",
       );
     }
+    if (this.isPubliclyServed(meta.status)) {
+      // published ⇔ unlisted: content objects stay as-is; only the search
+      // index membership and META change.
+      meta.status = visibility;
+      this.setExpiresAt(meta, expiresAt);
+      meta.updatedAt = this.now().toISOString();
+      if (visibility === "published") {
+        const extracted = await this.storage.getContentObject(
+          `reports/${id}/${EXTRACTED_TEXT_FILENAME}`,
+        );
+        await this.reindex(meta, extracted ? new TextDecoder().decode(extracted) : "");
+      } else {
+        await this.removeFromIndex(id);
+      }
+      await this.repo.update(meta);
+      return { report: meta, url: this.contentUrl(id) };
+    }
     const data = await this.loadSource(meta);
     if (!data) {
       throw new DomainError("conflict", "report has no publishable content; upload it first");
     }
     const { files, extraction } = await this.extractFiles(meta.kind, data);
+    this.setExpiresAt(meta, expiresAt);
     meta.updatedAt = this.now().toISOString();
-    await this.writePublic(meta, files, extraction.text);
+    await this.writePublic(meta, files, extraction.text, visibility);
     return { report: meta, url: this.contentUrl(id) };
   }
 
   /**
-   * Hide a published report (owner or admin): removed from list / search /
-   * content origin, but META and the editable source are kept. Idempotent.
+   * Hide a published / unlisted report (owner or admin): removed from list /
+   * search / content origin, but META and the editable source are kept.
+   * Idempotent.
    */
   async unpublish(user: AuthUser, id: string): Promise<ReportMeta> {
     const meta = await this.mustGet(id);
@@ -293,7 +455,7 @@ export class ReportService {
       throw new DomainError("forbidden", "report was taken down by an administrator");
     }
     if (meta.status === "private") return meta;
-    if (meta.status !== "published") {
+    if (!this.isPubliclyServed(meta.status)) {
       throw new DomainError("conflict", `report is ${meta.status}, not published`);
     }
     // Legacy reports: the public copy may be the only remaining bytes —
@@ -302,6 +464,8 @@ export class ReportService {
     await this.removeFromIndex(id);
     await this.storage.deleteContentPrefix(`reports/${id}/`);
     meta.status = "private";
+    // 非公開に戻したら公開期限も意味を失うのでクリアする（再 publish で再設定）。
+    delete meta.expiresAt;
     meta.updatedAt = this.now().toISOString();
     await this.repo.update(meta);
     await this.cdn.invalidate([`/r/${id}/*`]);
@@ -356,16 +520,82 @@ export class ReportService {
     return this.ingest(meta, data);
   }
 
+  /** バージョン履歴（owner or admin）。新しい版が先頭。 */
+  async listVersions(user: AuthUser, id: string): Promise<ReportVersion[]> {
+    const meta = await this.mustGet(id);
+    this.assertOwnerOrAdmin(user, meta);
+    if (meta.status === "takedown" && !user.isAdmin) {
+      throw new DomainError("forbidden", "report was taken down by an administrator");
+    }
+    return [...(meta.versions ?? [])].reverse();
+  }
+
+  /**
+   * 旧版の HTML（owner or admin）。getSource と同じ形:
+   * html kind → 保存された原本、zip kind → 展開した root index.html。
+   */
+  async getVersionSource(
+    user: AuthUser,
+    id: string,
+    version: number,
+  ): Promise<{ kind: ReportKind; html: string }> {
+    const meta = await this.mustGet(id);
+    this.assertOwnerOrAdmin(user, meta);
+    if (meta.status === "takedown" && !user.isAdmin) {
+      throw new DomainError("forbidden", "report was taken down by an administrator");
+    }
+    const entry = (meta.versions ?? []).find((v) => v.version === version);
+    if (!entry) throw new DomainError("not_found", "version not found");
+    const data = await this.storage.getContentObject(this.versionKey(id, version));
+    if (!data) throw new DomainError("not_found", "version content not found");
+    if (entry.kind === "html") {
+      return { kind: "html", html: new TextDecoder().decode(data) };
+    }
+    const { files } = await this.extractFiles("zip", data);
+    const index = files.find((f) => f.path === "index.html");
+    return { kind: "zip", html: new TextDecoder().decode(index?.data ?? new Uint8Array()) };
+  }
+
+  /**
+   * 旧版の原本を editContent と同じパスで再取り込み（owner or admin）:
+   * フルスキャン再実行・新しい version として履歴に積む。zip 版も原本
+   * （zip バイト列）をそのまま再取り込みする。日次クォータを消費する。
+   */
+  async rollback(
+    user: AuthUser,
+    id: string,
+    version: number,
+  ): Promise<{ report: ReportMeta; url?: string }> {
+    const meta = await this.mustGet(id);
+    this.assertOwnerOrAdmin(user, meta);
+    if (meta.status === "takedown" && !user.isAdmin) {
+      throw new DomainError("forbidden", "report was taken down by an administrator");
+    }
+    const entry = (meta.versions ?? []).find((v) => v.version === version);
+    if (!entry) throw new DomainError("not_found", "version not found");
+    const data = await this.storage.getContentObject(this.versionKey(id, version));
+    if (!data) throw new DomainError("not_found", "version content not found");
+    await this.consumeUploadQuota(user);
+    // kind は取り込み時点の値で復元する（zip 原本を html として扱わない）。
+    const target: ReportMeta = { ...meta, kind: entry.kind };
+    return this.ingest(target, data);
+  }
+
   async update(user: AuthUser, id: string, patch: UpdateReportRequest): Promise<ReportMeta> {
     const request = parseOrThrow(UpdateReportRequestSchema, patch, "report update");
     const meta = await this.mustGet(id);
     this.assertOwnerOrAdmin(user, meta);
     if (request.title !== undefined) meta.title = request.title;
     if (request.description !== undefined) meta.description = request.description;
+    if (request.tags !== undefined) meta.tags = request.tags;
+    if (request.expiresAt !== undefined) {
+      // null は無期限に戻す。過去日時は validation エラー。
+      this.setExpiresAt(meta, this.validateExpiresAt(request.expiresAt ?? undefined));
+    }
     meta.updatedAt = this.now().toISOString();
     await this.repo.update(meta);
     if (meta.status === "published") {
-      // Title/description carry index weight — rebuild postings.
+      // Title/description/tags carry index weight — rebuild postings.
       const extracted = await this.storage.getContentObject(
         `reports/${id}/${EXTRACTED_TEXT_FILENAME}`,
       );
@@ -416,7 +646,8 @@ export class ReportService {
 
   async flag(id: string, reason: string, audit?: AuditInfo): Promise<void> {
     const meta = await this.repo.get(id);
-    if (!meta || meta.status !== "published") {
+    // unlisted も URL を知っていれば閲覧できるため通報対象。
+    if (!meta || !this.isPubliclyServed(meta.status)) {
       throw new DomainError("not_found", "report not found");
     }
     const flag: ReportFlag = {
@@ -447,7 +678,8 @@ export class ReportService {
   /** 通報一覧: reports that received abuse flags, newest flag first. */
   async adminListFlagged(
     user: AuthUser,
-  ): Promise<Array<{ report: ReportMeta; flags: ReportFlag[] }>> {
+    opts?: PageOptions,
+  ): Promise<Page<{ report: ReportMeta; flags: ReportFlag[] }>> {
     this.assertAdmin(user);
     const flagged = await this.repo.listFlagged();
     const metas = await this.repo.getMany(flagged.map((f) => f.id));
@@ -458,7 +690,15 @@ export class ReportService {
     const latest = (flags: ReportFlag[]) =>
       flags.reduce((max, f) => (f.createdAt > max ? f.createdAt : max), "");
     items.sort((a, b) => latest(b.flags).localeCompare(latest(a.flags)));
-    return items;
+    // repo.listFlagged() は全件返すので、ソート後にオフセット cursor でページングする。
+    const limit = opts?.limit ?? 50;
+    const offset = opts?.cursor ? Number.parseInt(opts.cursor, 10) : 0;
+    if (Number.isNaN(offset) || offset < 0) {
+      throw new DomainError("bad_request", "invalid cursor");
+    }
+    const page = items.slice(offset, offset + limit);
+    const next = offset + limit;
+    return next < items.length ? { items: page, nextCursor: String(next) } : { items: page };
   }
 
   /** Resolve a report's flags (通報を処理済みにする). */
@@ -484,6 +724,42 @@ export class ReportService {
   // Internals
   // =====================
 
+  /** published / unlisted — content is served to anyone who has the URL. */
+  private isPubliclyServed(status: ReportStatus): status is PublishVisibility {
+    return status === "published" || status === "unlisted";
+  }
+
+  /**
+   * 遅延失効: expiresAt を過ぎたレポートは読み取りパス（get / listPublished /
+   * search）で「公開されていない」扱いにする。status は書き換えない。
+   * 既知の制約: 検索インデックスの postings と公開オリジン上のコンテンツ
+   * （reports/<id>/）は失効しても即時には消えない — 一覧/検索/get の応答で
+   * 失効を保証し、配信オリジン側の残存は将来のバッチ/イベント処理で対応する
+   * （README「有効期限つき公開」参照）。
+   */
+  private isExpired(meta: ReportMeta): boolean {
+    return meta.expiresAt !== undefined && Date.parse(meta.expiresAt) <= this.now().getTime();
+  }
+
+  /** publish / update の expiresAt 入力検証: 現在より未来であること。 */
+  private validateExpiresAt(expiresAt: string | undefined): string | undefined {
+    if (expiresAt === undefined) return undefined;
+    const t = Date.parse(expiresAt);
+    if (Number.isNaN(t)) {
+      throw new DomainError("validation_failed", "expiresAt must be an ISO 8601 datetime");
+    }
+    if (t <= this.now().getTime()) {
+      throw new DomainError("validation_failed", "expiresAt must be in the future");
+    }
+    return expiresAt;
+  }
+
+  /** expiresAt を設定（undefined は無期限 = フィールドごと削除）。 */
+  private setExpiresAt(meta: ReportMeta, expiresAt: string | undefined): void {
+    if (expiresAt !== undefined) meta.expiresAt = expiresAt;
+    else delete meta.expiresAt;
+  }
+
   private async mustGet(id: string): Promise<ReportMeta> {
     const meta = await this.repo.get(id);
     if (!meta) throw new DomainError("not_found", "report not found");
@@ -499,10 +775,15 @@ export class ReportService {
     if (!user.isAdmin) throw new DomainError("forbidden", "admin privileges required");
   }
 
+  /** UTC YYYY-MM-DD — increment と残数読み取りで必ず同じ境界を使う。 */
+  private quotaDateKey(): string {
+    return this.now().toISOString().slice(0, 10);
+  }
+
   private async consumeUploadQuota(user: AuthUser): Promise<void> {
-    const dateKey = this.now().toISOString().slice(0, 10);
-    const count = await this.repo.incrementDailyUploads(user.sub, dateKey);
-    if (count > this.dailyUploadLimit) {
+    // 無制限でもカウントは進める（usedToday 表示と、後から上限を設定した際の即時反映のため）。
+    const count = await this.repo.incrementDailyUploads(user.sub, this.quotaDateKey());
+    if (this.dailyUploadLimit !== null && count > this.dailyUploadLimit) {
       throw new DomainError(
         "rate_limited",
         `daily upload limit (${this.dailyUploadLimit}) exceeded`,
@@ -536,6 +817,8 @@ export class ReportService {
     const postings = buildDocumentTokens({
       title: meta.title,
       description: meta.description,
+      // tags を持たない既存データは空として扱う（後方互換）。
+      tags: meta.tags ?? [],
       body: bodyText,
     });
     await this.searchIndex.put(meta.id, postings, meta.updatedAt);
@@ -548,6 +831,11 @@ export class ReportService {
   /** Storage key of the canonical uploaded bytes (kept while the report exists). */
   private sourceKey(id: string): string {
     return `sources/${id}/current`;
+  }
+
+  /** Storage key of one retained version's original bytes. */
+  private versionKey(id: string, version: number): string {
+    return `sources/${id}/v${version}`;
   }
 
   /**
@@ -591,6 +879,7 @@ export class ReportService {
       sizeBytes: data.byteLength,
       version: isOverwrite ? meta.version + 1 : meta.version,
       updatedAt: this.now().toISOString(),
+      versions: [...(meta.versions ?? [])],
     };
 
     const scan = await this.scanner.scan({ kind: meta.kind, data });
@@ -599,6 +888,8 @@ export class ReportService {
 
     if (scan.verdict === "block") {
       next.status = "rejected";
+      // sources/ prefix ごと消えるため、バージョン履歴も空にする。
+      next.versions = [];
       await this.removeFromIndex(id);
       await this.storage.deleteContentPrefix(`reports/${id}/`);
       await this.storage.deleteContentPrefix(`sources/${id}/`);
@@ -613,14 +904,26 @@ export class ReportService {
     if (next.description === "" && extraction.description) {
       next.description = extraction.description.slice(0, REPORT_DESCRIPTION_MAX);
     }
-    await this.storage.putContentObject(
-      this.sourceKey(id),
-      data,
-      next.kind === "html" ? "text/html; charset=utf-8" : "application/zip",
-    );
+    const contentType = next.kind === "html" ? "text/html; charset=utf-8" : "application/zip";
+    await this.storage.putContentObject(this.sourceKey(id), data, contentType);
+    // バージョン履歴: 原本を sources/<id>/v<version> にも残し、上限超過分は
+    // 最古から間引く（メタとオブジェクトの両方）。
+    await this.storage.putContentObject(this.versionKey(id, next.version), data, contentType);
+    next.versions.push({
+      version: next.version,
+      kind: next.kind,
+      createdAt: next.updatedAt,
+      sizeBytes: data.byteLength,
+      verdict: scan.verdict,
+    });
+    while (next.versions.length > REPORT_VERSION_HISTORY_LIMIT) {
+      const oldest = next.versions.shift()!;
+      await this.storage.deleteContentObject(this.versionKey(id, oldest.version));
+    }
 
-    if (meta.status === "published") {
-      await this.writePublic(next, files, extraction.text);
+    if (this.isPubliclyServed(meta.status)) {
+      // 公開中（published / unlisted）の上書きは同じ公開範囲のまま再公開する。
+      await this.writePublic(next, files, extraction.text, meta.status);
       return { report: next, url: this.contentUrl(id) };
     }
     next.status = "private";
@@ -657,13 +960,15 @@ export class ReportService {
   }
 
   /**
-   * Write content objects + extracted text, rebuild the search index and mark
-   * the report published. Mutates `meta` and persists it.
+   * Write content objects + extracted text and mark the report published or
+   * unlisted. The search index is only rebuilt for published — unlisted is
+   * never indexed (removed if it was). Mutates `meta` and persists it.
    */
   private async writePublic(
     meta: ReportMeta,
     files: Array<{ path: string; data: Uint8Array }>,
     bodyText: string,
+    visibility: PublishVisibility = "published",
   ): Promise<void> {
     const id = meta.id;
     for (const file of files) {
@@ -678,8 +983,12 @@ export class ReportService {
       new TextEncoder().encode(bodyText),
       "text/plain; charset=utf-8",
     );
-    meta.status = "published";
-    await this.reindex(meta, bodyText);
+    meta.status = visibility;
+    if (visibility === "published") {
+      await this.reindex(meta, bodyText);
+    } else {
+      await this.removeFromIndex(id);
+    }
     await this.repo.update(meta);
     await this.cdn.invalidate([`/r/${id}/*`]);
   }

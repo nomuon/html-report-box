@@ -40,6 +40,11 @@ const ZIP_BLOCK_RULE_IDS: Partial<Record<ZipValidationCode, string>> = {
   disallowed_extension: "zip-disallowed-extension",
 };
 
+/** Deduped ruleIds synthesized from hostile-archive errors (for guidance coverage tests). */
+export const ZIP_ERROR_RULE_IDS: readonly string[] = [
+  ...new Set(Object.values(ZIP_BLOCK_RULE_IDS)),
+];
+
 export interface CreateScannerOptions {
   domainReputation: DomainReputation;
   config?: ScannerConfig;

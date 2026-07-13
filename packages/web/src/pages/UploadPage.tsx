@@ -1,33 +1,21 @@
 /** 画面②: アップロード (`/upload`) — D&D → メタ入力 → 進捗 → 結果 */
 import { useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
-import type { ScanFinding } from "@hrb/shared";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useApp, useSession } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
 import { CopyUrlRow } from "../components/CopyUrlRow.tsx";
 import { DropZone } from "../components/DropZone.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
+import { FindingsList } from "../components/FindingsList.tsx";
 import { LoginModal } from "../components/Header.tsx";
 import { Icon } from "../components/Icon.tsx";
+import { TagInput } from "../components/TagInput.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { extractHtmlTitle, titleFromFilename } from "../lib/html-title.ts";
-import { uploadToPresigned } from "../lib/upload.ts";
+import { UploadAbortedError, uploadToPresigned } from "../lib/upload.ts";
 import { isApiError } from "../lib/api.ts";
 import { DROPZONE_INITIAL, dropzoneReducer, validateFiles } from "../state/dropzone.ts";
-
-export function FindingsList({ findings }: { findings: ScanFinding[] }) {
-  if (findings.length === 0) return null;
-  return (
-    <ul className="hrb-findings">
-      {findings.map((f, i) => (
-        <li key={i} className="hrb-findings__item">
-          {f.message}
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 export function UploadPage() {
   const { api, config } = useApp();
@@ -39,12 +27,24 @@ export function UploadPage() {
   const [state, dispatch] = useReducer(dropzoneReducer, DROPZONE_INITIAL);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   // アップロード完了後に「公開する」を押したときの共有URL
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const fileRef = useRef<File | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // 日次アップロード残数（本日あと何件アップロードできるか）
+  const quotaQuery = useQuery({
+    queryKey: ["my-quota"],
+    queryFn: () => api.myQuota(),
+    enabled: session !== null,
+  });
+  const quota = quotaQuery.data;
+  // remaining === null は無制限（上限未設定）
+  const quotaExhausted = quota !== undefined && quota.remaining !== null && quota.remaining <= 0;
 
   if (!session) {
     return (
@@ -89,14 +89,23 @@ export function UploadPage() {
     if (state.phase !== "selected" || !fileRef.current || !title.trim()) return;
     setBusy(true);
     dispatch({ type: "UPLOAD_START" });
+    const controller = new AbortController();
+    abortRef.current = controller;
+    // キャンセル時の掃除用: create 済みで complete 前の META の id
+    let createdId: string | null = null;
     try {
       const created = await api.createReport({
         title: title.trim(),
         description: description.trim(),
+        tags,
         kind: state.file.kind,
       });
-      await uploadToPresigned(created.upload, fileRef.current, (percent) =>
-        dispatch({ type: "PROGRESS", percent }),
+      createdId = created.report.id;
+      await uploadToPresigned(
+        created.upload,
+        fileRef.current,
+        (percent) => dispatch({ type: "PROGRESS", percent }),
+        controller.signal,
       );
       dispatch({ type: "UPLOADED" });
       const completed = await api.completeReport(created.report.id, created.upload.key);
@@ -108,6 +117,13 @@ export function UploadPage() {
       void queryClient.invalidateQueries({ queryKey: ["reports"] });
       void queryClient.invalidateQueries({ queryKey: ["my-reports"] });
     } catch (err) {
+      if (err instanceof UploadAbortedError) {
+        dispatch({ type: "CANCEL_UPLOAD" });
+        toast.push("info", "アップロードをキャンセルしました");
+        // 未 complete の META は無害だが、消せるなら消す（失敗は無視）
+        if (createdId) void api.deleteReport(createdId).catch(() => {});
+        return;
+      }
       dispatch({ type: "FAIL" });
       if (isApiError(err) && err.code !== "network" && err.code !== "internal") {
         toast.push("danger", err.message);
@@ -115,6 +131,9 @@ export function UploadPage() {
         toast.push("danger", "アップロード処理に失敗しました。時間をおいて再試行してください");
       }
     } finally {
+      // quota は create 時点で消費されるため、成否によらず残数を取り直す
+      void queryClient.invalidateQueries({ queryKey: ["my-quota"] });
+      abortRef.current = null;
       setBusy(false);
     }
   };
@@ -123,6 +142,7 @@ export function UploadPage() {
     fileRef.current = null;
     setTitle("");
     setDescription("");
+    setTags([]);
     setPublishedUrl(null);
     dispatch({ type: "RESET" });
   };
@@ -215,11 +235,35 @@ export function UploadPage() {
       <h1 className="hrb-page__title">レポートをアップロード</h1>
 
       <div className="hrb-upload-zone">
-        <DropZone state={state} dispatch={dispatch} onFiles={(f) => void handleFiles(f)} resultContent={resultContent} />
+        <DropZone
+          state={state}
+          dispatch={dispatch}
+          onFiles={(f) => void handleFiles(f)}
+          onCancelUpload={() => abortRef.current?.abort()}
+          resultContent={resultContent}
+          disabledContent={
+            quotaExhausted && quota !== undefined ? (
+              <>
+                <div className="hrb-dropzone__icon" aria-hidden="true">
+                  <Icon name="ban" size={28} />
+                </div>
+                <p className="hrb-dropzone__lead">
+                  本日の上限（{quota.dailyUploadLimit}件）に達しました
+                </p>
+                <p className="hrb-dropzone__note">明日また利用できます</p>
+              </>
+            ) : undefined
+          }
+        />
         <p className="hrb-upload-note">
           <Icon name="shield-check" size={14} />
           対応形式: HTML（単一ファイル, 最大 5MB）/ ZIP（index.html 必須, 最大 20MB）· すべてのファイルは公開前にセキュリティスキャンされます
         </p>
+        {quota !== undefined && quota.remaining !== null && !quotaExhausted && (
+          <p className="hrb-upload-note hrb-upload-note--quota">
+            本日あと {quota.remaining} 件アップロードできます
+          </p>
+        )}
       </div>
 
       {state.phase === "selected" && (
@@ -250,6 +294,10 @@ export function UploadPage() {
               maxLength={2000}
             />
           </label>
+          <div className="hrb-field">
+            <span className="hrb-field__label">タグ（任意）</span>
+            <TagInput tags={tags} onChange={setTags} />
+          </div>
           <div className="hrb-upload-form__actions">
             <Button type="submit" loading={busy} disabled={!title.trim()}>
               アップロード

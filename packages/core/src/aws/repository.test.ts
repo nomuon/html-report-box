@@ -11,6 +11,7 @@ import {
   SK_META,
   SK_TOKENS,
   SK_UPLOAD,
+  SK_VIEWS,
   itemToMeta,
   metaToItem,
   quotaPk,
@@ -26,6 +27,7 @@ function sampleMeta(overrides: Partial<ReportMeta> = {}): ReportMeta {
     id: "abcdefghijklmnopqrstu",
     title: "Q2 sales report",
     description: "",
+    tags: [],
     ownerSub: "user-1",
     ownerName: "Alice",
     status: "private",
@@ -34,6 +36,7 @@ function sampleMeta(overrides: Partial<ReportMeta> = {}): ReportMeta {
     createdAt: "2026-07-01T00:00:00.000Z",
     updatedAt: "2026-07-02T00:00:00.000Z",
     findings: [],
+    versions: [],
     ...overrides,
   };
 }
@@ -185,6 +188,36 @@ describe("lists", () => {
     expect(client.inputsOf("QueryCommand")[1].ExclusiveStartKey).toEqual(lastKey);
   });
 
+  test("listPublished maps order=asc to ScanIndexForward and kind to a filter expression", async () => {
+    const client = new FakeClient().on("QueryCommand", () => ({ Items: [] }));
+    await repo(client).listPublished({ order: "asc", kind: "zip" });
+    const [input] = client.inputsOf("QueryCommand");
+    expect(input.ScanIndexForward).toBe(true);
+    expect(input.FilterExpression).toBe("#kind = :kind");
+    expect(input.ExpressionAttributeNames).toEqual({ "#kind": "kind" });
+    expect(input.ExpressionAttributeValues[":kind"]).toBe("zip");
+
+    // no kind / default order → no filter, descending
+    await repo(client).listPublished();
+    const second = client.inputsOf("QueryCommand")[1];
+    expect(second.ScanIndexForward).toBe(false);
+    expect(second.FilterExpression).toBeUndefined();
+  });
+
+  test("listPublished maps tag to a contains() filter (combinable with kind)", async () => {
+    const client = new FakeClient().on("QueryCommand", () => ({ Items: [] }));
+    await repo(client).listPublished({ tag: "月次" });
+    const [tagOnly] = client.inputsOf("QueryCommand");
+    expect(tagOnly.FilterExpression).toBe("contains(#tags, :tag)");
+    expect(tagOnly.ExpressionAttributeNames).toEqual({ "#tags": "tags" });
+    expect(tagOnly.ExpressionAttributeValues[":tag"]).toBe("月次");
+
+    await repo(client).listPublished({ kind: "html", tag: "月次" });
+    const both = client.inputsOf("QueryCommand")[1];
+    expect(both.FilterExpression).toBe("#kind = :kind AND contains(#tags, :tag)");
+    expect(both.ExpressionAttributeNames).toEqual({ "#kind": "kind", "#tags": "tags" });
+  });
+
   test("listByOwner queries GSI2 by ownerSub", async () => {
     const client = new FakeClient().on("QueryCommand", () => ({ Items: [] }));
     const page = await repo(client).listByOwner("user-9");
@@ -248,17 +281,28 @@ describe("tokens / pending upload", () => {
 describe("daily upload quota (conditional counter)", () => {
   test("increments atomically with the limit in the condition expression", async () => {
     const client = new FakeClient().on("UpdateCommand", () => ({ Attributes: { cnt: 3 } }));
-    const count = await repo(client).incrementDailyUploads("user-1", "2026-07-10");
+    const count = await repo(client, 30).incrementDailyUploads("user-1", "2026-07-10");
     expect(count).toBe(3);
     const [input] = client.inputsOf("UpdateCommand");
     expect(input.Key).toEqual({ pk: quotaPk("user-1"), sk: quotaSk("2026-07-10") });
     expect(input.UpdateExpression).toContain("ADD #c :one");
     expect(input.ConditionExpression).toBe("attribute_not_exists(#c) OR #c < :limit");
     expect(input.ExpressionAttributeNames).toEqual({ "#c": "cnt" });
-    expect(input.ExpressionAttributeValues[":limit"]).toBe(30); // DAILY_UPLOAD_LIMIT
+    expect(input.ExpressionAttributeValues[":limit"]).toBe(30);
     expect(input.ExpressionAttributeValues[":one"]).toBe(1);
     expect(typeof input.ExpressionAttributeValues[":ttl"]).toBe("number");
     expect(input.ReturnValues).toBe("ALL_NEW");
+  });
+
+  test("no limit configured (default) → unconditional increment", async () => {
+    const client = new FakeClient().on("UpdateCommand", () => ({ Attributes: { cnt: 31 } }));
+    const count = await repo(client).incrementDailyUploads("user-1", "2026-07-10");
+    expect(count).toBe(31);
+    const [input] = client.inputsOf("UpdateCommand");
+    expect(input.ConditionExpression).toBeUndefined();
+    expect(input.ExpressionAttributeValues[":limit"]).toBeUndefined();
+    expect(input.ExpressionAttributeValues[":one"]).toBe(1);
+    expect(typeof input.ExpressionAttributeValues[":ttl"]).toBe("number");
   });
 
   test("conditional failure means the cap was hit → returns limit+1", async () => {
@@ -268,6 +312,43 @@ describe("daily upload quota (conditional counter)", () => {
     expect(await repo(client, 5).incrementDailyUploads("user-1", "2026-07-10")).toBe(6);
     const [input] = client.inputsOf("UpdateCommand");
     expect(input.ExpressionAttributeValues[":limit"]).toBe(5);
+  });
+
+  test("getDailyUploads reads the counter item, 0 when absent", async () => {
+    const empty = new FakeClient();
+    expect(await repo(empty).getDailyUploads("user-1", "2026-07-10")).toBe(0);
+    const [input] = empty.inputsOf("GetCommand");
+    expect(input.Key).toEqual({ pk: quotaPk("user-1"), sk: quotaSk("2026-07-10") });
+
+    const client = new FakeClient().on("GetCommand", () => ({
+      Item: { pk: quotaPk("user-1"), sk: quotaSk("2026-07-10"), cnt: 7 },
+    }));
+    expect(await repo(client).getDailyUploads("user-1", "2026-07-10")).toBe(7);
+  });
+});
+
+describe("view counter", () => {
+  test("incrementViewCount adds atomically on the VIEWS item of the report partition", async () => {
+    const client = new FakeClient().on("UpdateCommand", () => ({ Attributes: { cnt: 4 } }));
+    expect(await repo(client).incrementViewCount("x")).toBe(4);
+    const [input] = client.inputsOf("UpdateCommand");
+    expect(input.Key).toEqual({ pk: reportPk("x"), sk: SK_VIEWS });
+    expect(input.UpdateExpression).toBe("ADD #c :one");
+    expect(input.ExpressionAttributeNames).toEqual({ "#c": "cnt" });
+    expect(input.ExpressionAttributeValues).toEqual({ ":one": 1 });
+    expect(input.ReturnValues).toBe("ALL_NEW");
+  });
+
+  test("getViewCount reads the VIEWS item, 0 when absent", async () => {
+    const empty = new FakeClient();
+    expect(await repo(empty).getViewCount("x")).toBe(0);
+    const [input] = empty.inputsOf("GetCommand");
+    expect(input.Key).toEqual({ pk: reportPk("x"), sk: SK_VIEWS });
+
+    const client = new FakeClient().on("GetCommand", () => ({
+      Item: { pk: reportPk("x"), sk: SK_VIEWS, cnt: 12 },
+    }));
+    expect(await repo(client).getViewCount("x")).toBe(12);
   });
 });
 
@@ -279,6 +360,7 @@ describe("delete / flags", () => {
         { pk, sk: SK_META },
         { pk, sk: SK_TOKENS },
         { pk, sk: SK_UPLOAD },
+        { pk, sk: SK_VIEWS },
         { pk, sk: `${FLAG_SK_PREFIX}2026-07-01T00:00:00.000Z#a` },
       ],
     }));
@@ -288,11 +370,12 @@ describe("delete / flags", () => {
     expect(query.ExpressionAttributeValues[":pk"]).toBe(pk);
     const [batch] = client.inputsOf("BatchWriteCommand");
     const deletes = batch.RequestItems[TABLE];
-    expect(deletes.length).toBe(4);
+    expect(deletes.length).toBe(5);
     expect(deletes.map((d: { DeleteRequest: { Key: { sk: string } } }) => d.DeleteRequest.Key.sk)).toEqual([
       SK_META,
       SK_TOKENS,
       SK_UPLOAD,
+      SK_VIEWS,
       `${FLAG_SK_PREFIX}2026-07-01T00:00:00.000Z#a`,
     ]);
   });

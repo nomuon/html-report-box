@@ -12,20 +12,29 @@ import type {
   AdminListUsersResponse,
   AdminReportActionResponse,
   CompleteReportResponse,
+  CreateApiKeyResponse,
   CreateReportRequestInput,
   CreateReportResponse,
   CreateUploadUrlResponse,
+  DeleteApiKeyResponse,
   DeleteReportResponse,
   ErrorCode,
   FlagReportResponse,
   GetConfigResponse,
+  GetQuotaResponse,
   GetReportResponse,
   GetReportSourceResponse,
+  GetReportVersionSourceResponse,
+  ListApiKeysResponse,
+  ListOrder,
   ListReportsResponse,
+  ListReportVersionsResponse,
   MyReportsResponse,
   PublishReportResponse,
+  PublishVisibility,
   ReportKind,
   ReportStatus,
+  RollbackReportResponse,
   SearchResponse,
   UnpublishReportResponse,
   UpdateReportContentResponse,
@@ -122,12 +131,24 @@ export class ApiClient {
     return this.request("GET", "/config");
   }
 
-  listReports(opts: { limit?: number; cursor?: string } = {}): Promise<ListReportsResponse> {
-    return this.request("GET", "/reports", { query: { limit: opts.limit, cursor: opts.cursor } });
+  listReports(
+    opts: { order?: ListOrder; kind?: ReportKind; tag?: string; limit?: number; cursor?: string } = {},
+  ): Promise<ListReportsResponse> {
+    return this.request("GET", "/reports", {
+      query: {
+        order: opts.order,
+        kind: opts.kind,
+        tag: opts.tag,
+        limit: opts.limit,
+        cursor: opts.cursor,
+      },
+    });
   }
 
-  search(q: string, limit?: number): Promise<SearchResponse> {
-    return this.request("GET", "/search", { query: { q, limit } });
+  search(q: string, opts: { limit?: number; cursor?: string } = {}): Promise<SearchResponse> {
+    return this.request("GET", "/search", {
+      query: { q, limit: opts.limit, cursor: opts.cursor },
+    });
   }
 
   getReport(id: string): Promise<GetReportResponse> {
@@ -142,6 +163,11 @@ export class ApiClient {
 
   myReports(opts: { limit?: number; cursor?: string } = {}): Promise<MyReportsResponse> {
     return this.request("GET", "/me/reports", { query: { limit: opts.limit, cursor: opts.cursor } });
+  }
+
+  /** 日次アップロード残数（本日あと何件アップロードできるか）。 */
+  myQuota(): Promise<GetQuotaResponse> {
+    return this.request("GET", "/me/quota");
   }
 
   createReport(req: CreateReportRequestInput): Promise<CreateReportResponse> {
@@ -162,8 +188,18 @@ export class ApiClient {
     return this.request("PATCH", `/reports/${encodeURIComponent(id)}`, { body: patch });
   }
 
-  publishReport(id: string): Promise<PublishReportResponse> {
-    return this.request("POST", `/reports/${encodeURIComponent(id)}/publish`);
+  /**
+   * 公開（visibility 省略時は published）。published⇔unlisted の切替や
+   * 有効期限の再設定も再呼び出しで行う（expiresAt 省略時は無期限）。
+   */
+  publishReport(
+    id: string,
+    visibility: PublishVisibility = "published",
+    expiresAt?: string,
+  ): Promise<PublishReportResponse> {
+    return this.request("POST", `/reports/${encodeURIComponent(id)}/publish`, {
+      body: { visibility, ...(expiresAt !== undefined ? { expiresAt } : {}) },
+    });
   }
 
   unpublishReport(id: string): Promise<UnpublishReportResponse> {
@@ -182,8 +218,43 @@ export class ApiClient {
     });
   }
 
+  /** バージョン履歴（owner/admin のみ、新しい順）。 */
+  listReportVersions(id: string): Promise<ListReportVersionsResponse> {
+    return this.request("GET", `/reports/${encodeURIComponent(id)}/versions`);
+  }
+
+  /** 旧版の HTML（owner/admin のみ）。 */
+  getReportVersionSource(id: string, version: number): Promise<GetReportVersionSourceResponse> {
+    return this.request(
+      "GET",
+      `/reports/${encodeURIComponent(id)}/versions/${encodeURIComponent(String(version))}/source`,
+    );
+  }
+
+  /** 旧版を新しい版として復元（サーバー側でフルスキャン再実行）。 */
+  rollbackReport(id: string, version: number): Promise<RollbackReportResponse> {
+    return this.request("POST", `/reports/${encodeURIComponent(id)}/rollback`, {
+      body: { version },
+    });
+  }
+
   deleteReport(id: string): Promise<DeleteReportResponse> {
     return this.request("DELETE", `/reports/${encodeURIComponent(id)}`);
+  }
+
+  // ---- API キー（MCP 等のプログラマティックアクセス用） ----
+
+  listApiKeys(): Promise<ListApiKeysResponse> {
+    return this.request("GET", "/me/api-keys");
+  }
+
+  /** 発行。plaintext はこのレスポンス限り（以後取得できない）。 */
+  createApiKey(name: string): Promise<CreateApiKeyResponse> {
+    return this.request("POST", "/me/api-keys", { body: { name } });
+  }
+
+  deleteApiKey(keyId: string): Promise<DeleteApiKeyResponse> {
+    return this.request("DELETE", `/me/api-keys/${encodeURIComponent(keyId)}`);
   }
 
   // ---- admin ----
@@ -196,8 +267,12 @@ export class ApiClient {
     });
   }
 
-  adminListFlagged(): Promise<AdminListFlaggedResponse> {
-    return this.request("GET", "/admin/flagged");
+  adminListFlagged(
+    opts: { limit?: number; cursor?: string } = {},
+  ): Promise<AdminListFlaggedResponse> {
+    return this.request("GET", "/admin/flagged", {
+      query: { limit: opts.limit, cursor: opts.cursor },
+    });
   }
 
   adminListFlags(id: string): Promise<AdminListFlagsResponse> {

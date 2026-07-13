@@ -34,6 +34,8 @@ export interface ServerConfig {
   googleAuth: GoogleAuthEnvConfig | null;
   /** /mcp の Bearer API キー。null なら認証なし（dev のみ許容）。 */
   mcpApiKey: string | null;
+  /** ユーザーあたりの日次アップロード上限。null = 無制限（HRB_DAILY_UPLOAD_LIMIT 未設定時の既定）。 */
+  dailyUploadLimit: number | null;
   /** x-dev-user ヘッダーによるユーザー切替を許すか（vps では常に false）。 */
   allowDevUserHeader: boolean;
   /** 別ポートの web dev サーバー向け CORS を有効にするか（dev のみ）。 */
@@ -49,6 +51,17 @@ function parseAdminEmails(raw: string | undefined): string[] {
     .split(",")
     .map((e) => e.trim())
     .filter((e) => e.length > 0);
+}
+
+/** 正の整数のみ許容。未設定・空は null（= 無制限）。 */
+function parseDailyUploadLimit(raw: string | undefined, errors: string[]): number | null {
+  if (raw === undefined || raw === "") return null;
+  const limit = Number(raw);
+  if (!Number.isInteger(limit) || limit < 1) {
+    errors.push(`HRB_DAILY_UPLOAD_LIMIT は正の整数を指定してください（未設定 = 無制限）: "${raw}"`);
+    return null;
+  }
+  return limit;
 }
 
 function parsePort(raw: string | undefined, label: string, fallback: number, errors: string[]): number {
@@ -102,6 +115,7 @@ export function resolveServerConfig(env: Record<string, string | undefined>): Se
   const warnings: string[] = [];
   const port = parsePort(env.PORT, "PORT", 3000, errors);
   const adminEmails = parseAdminEmails(env.HRB_ADMIN_EMAILS);
+  const dailyUploadLimit = parseDailyUploadLimit(env.HRB_DAILY_UPLOAD_LIMIT, errors);
 
   if (target === "dev") {
     if (errors.length > 0) throw new Error(configErrorMessage(target, errors));
@@ -118,6 +132,7 @@ export function resolveServerConfig(env: Record<string, string | undefined>): Se
         : null,
       // dev でも MCP_API_KEY を設定した場合だけ認証を有効化できる。
       mcpApiKey: env.MCP_API_KEY || null,
+      dailyUploadLimit,
       allowDevUserHeader: true,
       corsEnabled: true,
       warnings,
@@ -175,6 +190,7 @@ export function resolveServerConfig(env: Record<string, string | undefined>): Se
     contentOrigin: originString(contentOrigin as URL),
     googleAuth: { clientId: clientId as string, adminEmails },
     mcpApiKey: mcpApiKey as string,
+    dailyUploadLimit,
     allowDevUserHeader: false,
     corsEnabled: false,
     warnings,

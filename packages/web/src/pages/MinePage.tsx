@@ -3,12 +3,15 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { OwnedReport } from "@hrb/shared";
+import { scanFindingSummary } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
+import { ApiKeysSection } from "../components/ApiKeysSection.tsx";
 import { Button } from "../components/Button.tsx";
-import { StatusChip } from "../components/Chip.tsx";
+import { ExpiryChip, StatusChip, TagList } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { PublishToggle } from "../components/PublishToggle.tsx";
+import { TableSkeleton } from "../components/Skeleton.tsx";
 import {
   DeleteReportModal,
   EditHtmlModal,
@@ -54,7 +57,7 @@ export function MinePage() {
         <h1 className="hrb-page__title">マイレポート</h1>
       </div>
 
-      {query.isLoading && <p className="hrb-loading">読み込み中…</p>}
+      {query.isLoading && <TableSkeleton columns={5} />}
 
       {!query.isLoading && reports.length === 0 && (
         <EmptyState
@@ -71,6 +74,7 @@ export function MinePage() {
               <tr>
                 <th>タイトル</th>
                 <th>公開状態</th>
+                <th>閲覧数</th>
                 <th>更新日時</th>
                 <th>操作</th>
               </tr>
@@ -79,21 +83,25 @@ export function MinePage() {
               {reports.map((r) => (
                 <tr key={r.id} className={r.status === "rejected" ? "hrb-table__row--rejected" : ""}>
                   <td>
-                    <Link to={`/reports/${r.id}`} className="hrb-table__title">
-                      {r.title}
-                    </Link>
+                    <span className="hrb-table__title-cell">
+                      <Link to={`/reports/${r.id}`} className="hrb-table__title">
+                        {r.title}
+                      </Link>
+                      <TagList tags={r.tags} />
+                    </span>
                   </td>
                   <td>
                     <span className="hrb-status-cell">
-                      {r.status === "published" || r.status === "private" ? (
+                      {r.status === "published" || r.status === "unlisted" || r.status === "private" ? (
                         <PublishToggle report={r} />
                       ) : (
                         <StatusChip status={r.status} />
                       )}
+                      <ExpiryChip status={r.status} expiresAt={r.expiresAt} />
                       {r.status === "rejected" && r.findings.length > 0 && (
                         <span
                           className="hrb-tip"
-                          data-tip={r.findings.map((f) => f.message).join(" / ")}
+                          data-tip={r.findings.map(scanFindingSummary).join(" / ")}
                           tabIndex={0}
                         >
                           <Icon name="info" size={15} />
@@ -102,7 +110,7 @@ export function MinePage() {
                       {r.status !== "rejected" && r.verdict === "warn" && (
                         <span
                           className="hrb-tip"
-                          data-tip={`スキャン注意項目: ${r.findings.map((f) => f.message).join(" / ")}`}
+                          data-tip={`スキャン注意項目: ${r.findings.map(scanFindingSummary).join(" / ")}`}
                           tabIndex={0}
                         >
                           <Icon name="info" size={15} />
@@ -110,6 +118,7 @@ export function MinePage() {
                       )}
                     </span>
                   </td>
+                  <td className="hrb-table__views">{r.viewCount ?? 0}</td>
                   <td className="hrb-table__date">{formatDateTime(r.updatedAt)}</td>
                   <td>
                     <div className="hrb-row-actions">
@@ -135,8 +144,8 @@ export function MinePage() {
                       <button
                         type="button"
                         className="hrb-icon-btn hrb-tip"
-                        data-tip="タイトル・説明を編集"
-                        aria-label="タイトル・説明を編集"
+                        data-tip="タイトル・説明・タグを編集"
+                        aria-label="タイトル・説明・タグを編集"
                         onClick={() => setModal({ type: "edit", report: r })}
                       >
                         <Icon name="pencil" size={16} />
@@ -170,6 +179,9 @@ export function MinePage() {
           </Button>
         </div>
       )}
+
+      <ApiKeysSection />
+
 
       {modal?.type === "edit-html" && (
         <EditHtmlModal

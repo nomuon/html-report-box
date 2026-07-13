@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLocalContext, DEV_USER_HEADER } from "@hrb/core/local";
-import type { ScanResult, SecurityScanner } from "@hrb/core";
+import type { ScanResult, SecurityScanner, ZipExtractor } from "@hrb/core";
 import { createApp, FLAG_RATE_LIMIT } from "./app.ts";
 import type { AppType } from "./app.ts";
 
@@ -26,7 +26,14 @@ class FakeScanner implements SecurityScanner {
   }
 }
 
-function makeEnv(opts: { dailyUploadLimit?: number } = {}) {
+/** どんなバイト列でも root index.html 1 枚として展開する（zip kind のテスト用）。 */
+const fakeZipExtractor: ZipExtractor = {
+  async extract(data) {
+    return [{ path: "index.html", data }];
+  },
+};
+
+function makeEnv(opts: { dailyUploadLimit?: number; now?: () => Date } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "hrb-api-test-"));
   tempDirs.push(dir);
   const scanner = new FakeScanner();
@@ -34,6 +41,8 @@ function makeEnv(opts: { dailyUploadLimit?: number } = {}) {
     dataDir: dir,
     contentBaseUrl: BASE,
     scanner,
+    zipExtractor: fakeZipExtractor,
+    ...(opts.now !== undefined ? { now: opts.now } : {}),
     ...(opts.dailyUploadLimit !== undefined ? { dailyUploadLimit: opts.dailyUploadLimit } : {}),
   });
   const app = createApp({
@@ -83,10 +92,11 @@ async function upload(
   user: string,
   title: string,
   html = `<html><head><title>${title}</title></head><body>report body for ${title}</body></html>`,
+  kind: "html" | "zip" = "html",
 ) {
   const created = await call(env.app, "POST", "/reports", {
     user,
-    body: { title, kind: "html" },
+    body: { title, kind },
   });
   expect(created.status).toBe(201);
   const id: string = created.json.report.id;
@@ -105,8 +115,9 @@ async function uploadPublished(
   user: string,
   title: string,
   html?: string,
+  kind?: "html" | "zip",
 ) {
-  const result = await upload(env, user, title, html);
+  const result = await upload(env, user, title, html, kind);
   const published = await call(env.app, "POST", `/reports/${result.id}/publish`, { user });
   expect(published.status).toBe(200);
   return { ...result, published };
@@ -123,8 +134,14 @@ test("GET /config returns dev auth config and limits", async () => {
   expect(res.json.contentBaseUrl).toBe(BASE);
   expect(res.json.auth.mode).toBe("dev");
   expect(res.json.auth.users).toEqual(["alice", "bob", "admin"]);
-  expect(res.json.limits.dailyUploadLimit).toBeGreaterThan(0);
+  expect(res.json.limits.dailyUploadLimit).toBeNull(); // 既定は無制限
   expect(res.json.limits.maxHtmlSizeBytes).toBeGreaterThan(0);
+});
+
+test("GET /config advertises the daily upload limit when configured", async () => {
+  const env = makeEnv({ dailyUploadLimit: 5 });
+  const res = await call(env.app, "GET", "/config");
+  expect(res.json.limits.dailyUploadLimit).toBe(5);
 });
 
 // =====================
@@ -187,6 +204,147 @@ test("GET /search requires q", async () => {
   const res = await call(env.app, "GET", "/search");
   expect(res.status).toBe(400);
   expect(res.json.error.code).toBe("validation_failed");
+});
+
+// =====================
+// GET /reports — order / kind
+// =====================
+
+test("GET /reports supports order=asc and a kind filter", async () => {
+  // updatedAt の同着で並びが揺れないよう、1秒ずつ進む固定クロックを使う
+  let tick = 0;
+  const env = makeEnv({ now: () => new Date(Date.UTC(2026, 6, 12, 0, 0, tick++)) });
+  const a = await uploadPublished(env, "alice", "oldest html");
+  const b = await uploadPublished(env, "alice", "middle zip", "<html>zip index</html>", "zip");
+  const c = await uploadPublished(env, "alice", "newest html");
+
+  // default: 新しい順（updatedAt desc）
+  const desc = await call(env.app, "GET", "/reports");
+  expect(desc.json.reports.map((r: any) => r.id)).toEqual([c.id, b.id, a.id]);
+
+  const asc = await call(env.app, "GET", "/reports?order=asc");
+  expect(asc.status).toBe(200);
+  expect(asc.json.reports.map((r: any) => r.id)).toEqual([a.id, b.id, c.id]);
+
+  const zipOnly = await call(env.app, "GET", "/reports?kind=zip");
+  expect(zipOnly.json.reports.map((r: any) => r.id)).toEqual([b.id]);
+
+  const htmlAsc = await call(env.app, "GET", "/reports?kind=html&order=asc");
+  expect(htmlAsc.json.reports.map((r: any) => r.id)).toEqual([a.id, c.id]);
+
+  // 契約スキーマ外の値は 400 validation_failed
+  const badOrder = await call(env.app, "GET", "/reports?order=up");
+  expect(badOrder.status).toBe(400);
+  expect(badOrder.json.error.code).toBe("validation_failed");
+  const badKind = await call(env.app, "GET", "/reports?kind=tar");
+  expect(badKind.status).toBe(400);
+  expect(badKind.json.error.code).toBe("validation_failed");
+});
+
+// =====================
+// Tags — create / PATCH / list filter
+// =====================
+
+test("tags: create persists them, GET /reports?tag= filters, PATCH replaces + reindexes", async () => {
+  const env = makeEnv();
+  const created = await call(env.app, "POST", "/reports", {
+    user: "alice",
+    body: { title: "タグ付き", kind: "html", tags: [" 月次 ", "月次", "", "営業"] },
+  });
+  expect(created.status).toBe(201);
+  expect(created.json.report.tags).toEqual(["月次", "営業"]); // 正規化済み
+  const id: string = created.json.report.id;
+  await env.ctx.storage.putStagingObject(
+    created.json.upload.key,
+    new TextEncoder().encode("<html><body>tag body</body></html>"),
+  );
+  await call(env.app, "POST", `/reports/${id}/complete`, {
+    user: "alice",
+    body: { key: created.json.upload.key },
+  });
+  await call(env.app, "POST", `/reports/${id}/publish`, { user: "alice" });
+  const { id: other } = await uploadPublished(env, "alice", "タグなし");
+
+  // 単一タグの完全一致絞り込み
+  const filtered = await call(env.app, "GET", `/reports?tag=${encodeURIComponent("月次")}`);
+  expect(filtered.status).toBe(200);
+  expect(filtered.json.reports.map((r: any) => r.id)).toEqual([id]);
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(2);
+  expect(other).not.toBe(id);
+
+  // タグは公開ビューに含まれ、検索でもヒットする（重み6）
+  const hit = await call(env.app, "GET", `/search?q=${encodeURIComponent("営業")}`);
+  expect(hit.json.results.map((r: any) => r.report.id)).toEqual([id]);
+  expect(hit.json.results[0].score).toBe(6);
+
+  // PATCH で置換（省略時は変更なし・[] で全削除）
+  const patched = await call(env.app, "PATCH", `/reports/${id}`, {
+    user: "alice",
+    body: { tags: ["再編"] },
+  });
+  expect(patched.status).toBe(200);
+  expect(patched.json.report.tags).toEqual(["再編"]);
+  expect((await call(env.app, "GET", `/reports?tag=${encodeURIComponent("月次")}`)).json.reports).toHaveLength(0);
+  expect((await call(env.app, "GET", `/reports?tag=${encodeURIComponent("再編")}`)).json.reports).toHaveLength(1);
+
+  const titleOnly = await call(env.app, "PATCH", `/reports/${id}`, {
+    user: "alice",
+    body: { title: "改題" },
+  });
+  expect(titleOnly.json.report.tags).toEqual(["再編"]);
+
+  // バリデーション: 11個 / 31文字 / 空タグクエリは 400
+  const tooMany = await call(env.app, "PATCH", `/reports/${id}`, {
+    user: "alice",
+    body: { tags: Array.from({ length: 11 }, (_, i) => `t${i}`) },
+  });
+  expect(tooMany.status).toBe(400);
+  expect(tooMany.json.error.code).toBe("validation_failed");
+  const tooLong = await call(env.app, "POST", "/reports", {
+    user: "alice",
+    body: { title: "t", kind: "html", tags: ["x".repeat(31)] },
+  });
+  expect(tooLong.status).toBe(400);
+  const blankTag = await call(env.app, "GET", "/reports?tag=%20%20");
+  expect(blankTag.status).toBe(400);
+  expect(blankTag.json.error.code).toBe("validation_failed");
+});
+
+// =====================
+// GET /search — cursor pagination
+// =====================
+
+test("GET /search paginates with nextCursor", async () => {
+  let tick = 0;
+  const env = makeEnv({ now: () => new Date(Date.UTC(2026, 6, 12, 0, 0, tick++)) });
+  const ids: string[] = [];
+  for (const title of ["paging first", "paging second", "paging third"]) {
+    const { id } = await uploadPublished(env, "alice", title);
+    ids.push(id);
+  }
+
+  const first = await call(env.app, "GET", "/search?q=paging&limit=2");
+  expect(first.status).toBe(200);
+  expect(first.json.results).toHaveLength(2);
+  expect(first.json.nextCursor).toBeDefined();
+
+  const second = await call(
+    env.app,
+    "GET",
+    `/search?q=paging&limit=2&cursor=${first.json.nextCursor}`,
+  );
+  expect(second.status).toBe(200);
+  expect(second.json.results).toHaveLength(1);
+  expect(second.json.nextCursor).toBeUndefined();
+
+  // ページをまたいで重複せず全件をカバーする
+  const seen = [...first.json.results, ...second.json.results].map((r: any) => r.report.id);
+  expect(new Set(seen).size).toBe(3);
+  expect([...seen].sort()).toEqual([...ids].sort());
+
+  const bad = await call(env.app, "GET", "/search?q=paging&cursor=xyz");
+  expect(bad.status).toBe(400);
+  expect(bad.json.error.code).toBe("bad_request");
 });
 
 test("unknown route → 404 with error envelope", async () => {
@@ -290,6 +448,221 @@ test("non-published report: owner and admin see it, others get 404", async () =>
   expect(mine.json.reports.map((r: any) => r.id)).toContain(id);
 });
 
+test("publish with visibility=unlisted: link-only — anyone can read, never listed or searched", async () => {
+  const env = makeEnv();
+  const { id } = await upload(env, "alice", "Unlisted Numbers");
+
+  const published = await call(env.app, "POST", `/reports/${id}/publish`, {
+    user: "alice",
+    body: { visibility: "unlisted" },
+  });
+  expect(published.status).toBe(200);
+  expect(published.json.report.status).toBe("unlisted");
+  expect(published.json.url).toBe(`${BASE}/r/${id}/`);
+
+  // URL を知っていれば匿名でも閲覧できる（content URL 付き）
+  const anon = await call(env.app, "GET", `/reports/${id}`);
+  expect(anon.status).toBe(200);
+  expect(anon.json.report.status).toBe("unlisted");
+  expect(anon.json.url).toBe(`${BASE}/r/${id}/`);
+
+  // 一覧・検索には載らない
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(0);
+  expect((await call(env.app, "GET", "/search?q=unlisted")).json.results).toHaveLength(0);
+
+  // unlisted でも通報できる
+  const flagged = await call(env.app, "POST", `/reports/${id}/flag`, {
+    body: { reason: "link-only but viewable" },
+    ip: "203.0.113.9",
+  });
+  expect(flagged.status).toBe(200);
+
+  // published への切替（visibility 省略 = published: 後方互換）で一覧・検索に載る
+  const republished = await call(env.app, "POST", `/reports/${id}/publish`, { user: "alice" });
+  expect(republished.status).toBe(200);
+  expect(republished.json.report.status).toBe("published");
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(1);
+  expect(
+    (await call(env.app, "GET", "/search?q=unlisted")).json.results.map((r: any) => r.report.id),
+  ).toContain(id);
+
+  // published → unlisted の再切替で一覧・検索から消える
+  const relisted = await call(env.app, "POST", `/reports/${id}/publish`, {
+    user: "alice",
+    body: { visibility: "unlisted" },
+  });
+  expect(relisted.json.report.status).toBe("unlisted");
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(0);
+  expect((await call(env.app, "GET", "/search?q=unlisted")).json.results).toHaveLength(0);
+
+  // 不正な visibility は validation_failed
+  const invalid = await call(env.app, "POST", `/reports/${id}/publish`, {
+    user: "alice",
+    body: { visibility: "secret" },
+  });
+  expect(invalid.status).toBe(400);
+  expect(invalid.json.error.code).toBe("validation_failed");
+
+  // unpublish で従来どおり private へ
+  const unpublished = await call(env.app, "POST", `/reports/${id}/unpublish`, { user: "alice" });
+  expect(unpublished.json.report.status).toBe("private");
+  expect((await call(env.app, "GET", `/reports/${id}`)).status).toBe(404);
+});
+
+test("publish with expiresAt: past is rejected; expiry hides the report (遅延失効); PATCH null clears", async () => {
+  let clock = new Date("2026-07-12T00:00:00.000Z");
+  const env = makeEnv({ now: () => clock });
+  const { id } = await upload(env, "alice", "期限つきレポート");
+
+  // 過去日時は validation_failed
+  const past = new Date(clock.getTime() - 1000).toISOString();
+  const bad = await call(env.app, "POST", `/reports/${id}/publish`, {
+    user: "alice",
+    body: { expiresAt: past },
+  });
+  expect(bad.status).toBe(400);
+  expect(bad.json.error.code).toBe("validation_failed");
+
+  // 未来の期限つきで公開 → 期限前は誰でも見える
+  const expiresAt = new Date(clock.getTime() + 60 * 60 * 1000).toISOString();
+  const ok = await call(env.app, "POST", `/reports/${id}/publish`, {
+    user: "alice",
+    body: { expiresAt },
+  });
+  expect(ok.status).toBe(200);
+  expect(ok.json.report.expiresAt).toBe(expiresAt);
+  expect((await call(env.app, "GET", `/reports/${id}`, { user: "bob" })).status).toBe(200);
+
+  // 期限経過 → 非オーナーには 404、一覧・検索からも消える
+  clock = new Date(clock.getTime() + 2 * 60 * 60 * 1000);
+  expect((await call(env.app, "GET", `/reports/${id}`, { user: "bob" })).status).toBe(404);
+  expect((await call(env.app, "GET", "/reports")).json.reports).toHaveLength(0);
+  expect((await call(env.app, "GET", "/search?q=期限つき")).json.results).toHaveLength(0);
+
+  // オーナーはメタを閲覧でき（url なし）、過去の expiresAt で期限切れが分かる
+  const mine = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(mine.status).toBe(200);
+  expect(mine.json.url).toBeUndefined();
+  expect(mine.json.report.status).toBe("published");
+  expect(mine.json.report.expiresAt).toBe(expiresAt);
+
+  // PATCH expiresAt=null で無期限に戻す → 再び見える（遅延失効は status を変えないため）
+  const cleared = await call(env.app, "PATCH", `/reports/${id}`, {
+    user: "alice",
+    body: { expiresAt: null },
+  });
+  expect(cleared.status).toBe(200);
+  expect(cleared.json.report.expiresAt).toBeUndefined();
+  expect((await call(env.app, "GET", `/reports/${id}`, { user: "bob" })).status).toBe(200);
+});
+
+test("admin can filter /admin/reports by status=unlisted and take an unlisted report down", async () => {
+  const env = makeEnv();
+  await uploadPublished(env, "alice", "Listed One");
+  const { id: unlistedId } = await upload(env, "alice", "Unlisted One");
+  await call(env.app, "POST", `/reports/${unlistedId}/publish`, {
+    user: "alice",
+    body: { visibility: "unlisted" },
+  });
+
+  const filtered = await call(env.app, "GET", "/admin/reports?status=unlisted", { user: "admin" });
+  expect(filtered.status).toBe(200);
+  expect(filtered.json.reports.map((r: any) => r.id)).toEqual([unlistedId]);
+
+  const down = await call(env.app, "POST", `/admin/reports/${unlistedId}/takedown`, {
+    user: "admin",
+  });
+  expect(down.status).toBe(200);
+  expect(down.json.report.status).toBe("takedown");
+});
+
+test("GET /reports/:id returns isOwner from the viewer context", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Ownership");
+
+  // published: everyone can read, but only the owner gets isOwner=true
+  const owner = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(owner.status).toBe(200);
+  expect(owner.json.isOwner).toBe(true);
+  const other = await call(env.app, "GET", `/reports/${id}`, { user: "bob" });
+  expect(other.json.isOwner).toBe(false);
+  const admin = await call(env.app, "GET", `/reports/${id}`, { user: "admin" });
+  expect(admin.json.isOwner).toBe(false);
+  const unauth = await call(env.app, "GET", `/reports/${id}`);
+  expect(unauth.json.isOwner).toBe(false);
+
+  // private: owner keeps isOwner=true, admin sees it with isOwner=false
+  await call(env.app, "POST", `/reports/${id}/unpublish`, { user: "alice" });
+  const privOwner = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(privOwner.json.isOwner).toBe(true);
+  const privAdmin = await call(env.app, "GET", `/reports/${id}`, { user: "admin" });
+  expect(privAdmin.json.isOwner).toBe(false);
+});
+
+test("GET /reports/:id exposes verdict/findings to owner and admin only", async () => {
+  const env = makeEnv();
+  env.scanner.next = {
+    verdict: "warn",
+    findings: [
+      {
+        ruleId: "external-form-action",
+        severity: "warn",
+        message: "form submits to an external origin",
+      },
+    ],
+  };
+  const { id } = await uploadPublished(env, "alice", "Warned");
+
+  const owner = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(owner.json.verdict).toBe("warn");
+  expect(owner.json.findings).toHaveLength(1);
+  const admin = await call(env.app, "GET", `/reports/${id}`, { user: "admin" });
+  expect(admin.json.verdict).toBe("warn");
+  // 非オーナー/未認証にはスキャン結果を出さない（PublicReport と同じ扱い）
+  const other = await call(env.app, "GET", `/reports/${id}`, { user: "bob" });
+  expect(other.json.verdict).toBeUndefined();
+  expect(other.json.findings).toBeUndefined();
+  const unauth = await call(env.app, "GET", `/reports/${id}`);
+  expect(unauth.json.verdict).toBeUndefined();
+});
+
+test("GET /reports/:id counts views and exposes viewCount to owner/admin only", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Counted");
+
+  // 他人・未認証の閲覧はカウントされ、viewCount は返らない
+  const other = await call(env.app, "GET", `/reports/${id}`, { user: "bob" });
+  expect(other.json.viewCount).toBeUndefined();
+  const unauth = await call(env.app, "GET", `/reports/${id}`);
+  expect(unauth.json.viewCount).toBeUndefined();
+
+  // オーナーの閲覧はカウントされず、累計が見える
+  const owner = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(owner.json.viewCount).toBe(2);
+  const again = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(again.json.viewCount).toBe(2);
+
+  // 非公開に戻すと閲覧は増えない（オーナー/管理者しか読めない）
+  await call(env.app, "POST", `/reports/${id}/unpublish`, { user: "alice" });
+  const priv = await call(env.app, "GET", `/reports/${id}`, { user: "alice" });
+  expect(priv.json.viewCount).toBe(2);
+  const privAdmin = await call(env.app, "GET", `/reports/${id}`, { user: "admin" });
+  expect(privAdmin.json.viewCount).toBe(2);
+});
+
+test("GET /me/reports includes viewCount per report; DELETE purges the counter", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Mine Counted");
+  await call(env.app, "GET", `/reports/${id}`, { user: "bob" });
+
+  const mine = await call(env.app, "GET", "/me/reports", { user: "alice" });
+  expect(mine.status).toBe(200);
+  expect(mine.json.reports[0].viewCount).toBe(1);
+
+  await call(env.app, "DELETE", `/reports/${id}`, { user: "alice" });
+  expect(await env.ctx.repo.getViewCount(id)).toBe(0);
+});
+
 test("complete with an unknown key → 400", async () => {
   const env = makeEnv();
   const created = await call(env.app, "POST", "/reports", {
@@ -365,6 +738,47 @@ test("daily upload quota → 429 rate_limited", async () => {
   expect(third.json.error.code).toBe("rate_limited");
   // Other users have their own quota.
   expect((await call(env.app, "POST", "/reports", { user: "bob", body })).status).toBe(201);
+});
+
+test("既定（上限未設定）はアップロードが制限されず quota は無制限を返す", async () => {
+  const env = makeEnv();
+  const body = { title: "Unlimited", kind: "html" };
+  for (let i = 0; i < 5; i++) {
+    expect((await call(env.app, "POST", "/reports", { user: "alice", body })).status).toBe(201);
+  }
+  const quota = await call(env.app, "GET", "/me/quota", { user: "alice" });
+  expect(quota.status).toBe(200);
+  expect(quota.json).toEqual({ dailyUploadLimit: null, usedToday: 5, remaining: null });
+});
+
+test("GET /me/quota returns the remaining daily uploads per user", async () => {
+  const env = makeEnv({ dailyUploadLimit: 2 });
+
+  // requireAuth: unauthenticated callers get 401.
+  const unauth = await call(env.app, "GET", "/me/quota");
+  expect(unauth.status).toBe(401);
+  expect(unauth.json.error.code).toBe("unauthorized");
+
+  const fresh = await call(env.app, "GET", "/me/quota", { user: "alice" });
+  expect(fresh.status).toBe(200);
+  expect(fresh.json).toEqual({ dailyUploadLimit: 2, usedToday: 0, remaining: 2 });
+
+  const body = { title: "Quota View", kind: "html" };
+  await call(env.app, "POST", "/reports", { user: "alice", body });
+  const afterOne = await call(env.app, "GET", "/me/quota", { user: "alice" });
+  expect(afterOne.json).toEqual({ dailyUploadLimit: 2, usedToday: 1, remaining: 1 });
+
+  // 上限到達（3本目は 429）後も remaining は 0 のまま負にならない。
+  await call(env.app, "POST", "/reports", { user: "alice", body });
+  expect((await call(env.app, "POST", "/reports", { user: "alice", body })).status).toBe(429);
+  const exhausted = await call(env.app, "GET", "/me/quota", { user: "alice" });
+  expect(exhausted.json).toEqual({ dailyUploadLimit: 2, usedToday: 2, remaining: 0 });
+
+  // 読み取りは quota を消費しない & 他ユーザーは独立。
+  const again = await call(env.app, "GET", "/me/quota", { user: "alice" });
+  expect(again.json.remaining).toBe(0);
+  const bob = await call(env.app, "GET", "/me/quota", { user: "bob" });
+  expect(bob.json).toEqual({ dailyUploadLimit: 2, usedToday: 0, remaining: 2 });
 });
 
 // =====================
@@ -585,6 +999,127 @@ test("block verdict → rejected immediately, findings visible to owner", async 
 });
 
 // =====================
+// Version history & rollback
+// =====================
+
+test("GET /reports/:id/versions is owner/admin only and lists newest first", async () => {
+  const env = makeEnv();
+  const { id } = await upload(env, "alice", "Versions v1");
+  await call(env.app, "PUT", `/reports/${id}/content`, {
+    user: "alice",
+    body: { html: "<html><head><title>Versions v2</title></head><body>second body</body></html>" },
+  });
+
+  expect((await call(env.app, "GET", `/reports/${id}/versions`)).status).toBe(401);
+  expect((await call(env.app, "GET", `/reports/${id}/versions`, { user: "bob" })).status).toBe(403);
+
+  const owner = await call(env.app, "GET", `/reports/${id}/versions`, { user: "alice" });
+  expect(owner.status).toBe(200);
+  expect(owner.json.versions.map((v: any) => v.version)).toEqual([2, 1]);
+  expect(owner.json.versions[0]).toMatchObject({ kind: "html", verdict: "pass" });
+  expect(typeof owner.json.versions[0].sizeBytes).toBe("number");
+
+  const admin = await call(env.app, "GET", `/reports/${id}/versions`, { user: "admin" });
+  expect(admin.status).toBe(200);
+  expect(admin.json.versions).toHaveLength(2);
+
+  // 公開ビューにはバージョン履歴を出さない（PublicReport から omit）
+  await call(env.app, "POST", `/reports/${id}/publish`, { user: "alice" });
+  const pub = await call(env.app, "GET", `/reports/${id}`, { user: "bob" });
+  expect(pub.json.report.versions).toBeUndefined();
+});
+
+test("GET /reports/:id/versions/:version/source returns the old html (owner/admin only)", async () => {
+  const env = makeEnv();
+  const { id } = await upload(env, "alice", "Old Source", "<html><body>original body</body></html>");
+  await call(env.app, "PUT", `/reports/${id}/content`, {
+    user: "alice",
+    body: { html: "<html><body>replaced body</body></html>" },
+  });
+
+  const v1 = await call(env.app, "GET", `/reports/${id}/versions/1/source`, { user: "alice" });
+  expect(v1.status).toBe(200);
+  expect(v1.json.kind).toBe("html");
+  expect(v1.json.html).toContain("original body");
+
+  expect((await call(env.app, "GET", `/reports/${id}/versions/1/source`, { user: "bob" })).status).toBe(403);
+  expect((await call(env.app, "GET", `/reports/${id}/versions/1/source`)).status).toBe(401);
+
+  const missing = await call(env.app, "GET", `/reports/${id}/versions/9/source`, { user: "alice" });
+  expect(missing.status).toBe(404);
+  const badParam = await call(env.app, "GET", `/reports/${id}/versions/abc/source`, { user: "alice" });
+  expect(badParam.status).toBe(400);
+  expect(badParam.json.error.code).toBe("validation_failed");
+});
+
+test("POST /reports/:id/rollback restores an old version as a new version (re-scanned)", async () => {
+  const env = makeEnv();
+  const { id } = await uploadPublished(env, "alice", "Rollback Target", "<html><body>first body</body></html>");
+  await call(env.app, "PUT", `/reports/${id}/content`, {
+    user: "alice",
+    body: { html: "<html><body>second body</body></html>" },
+  });
+
+  // 非オーナーは復元できない / 不明バージョンは 404 / 不正 body は 400
+  expect((await call(env.app, "POST", `/reports/${id}/rollback`, { user: "bob", body: { version: 1 } })).status).toBe(403);
+  expect((await call(env.app, "POST", `/reports/${id}/rollback`, { user: "alice", body: { version: 9 } })).status).toBe(404);
+  expect((await call(env.app, "POST", `/reports/${id}/rollback`, { user: "alice", body: { version: 0 } })).status).toBe(400);
+
+  const rolled = await call(env.app, "POST", `/reports/${id}/rollback`, {
+    user: "alice",
+    body: { version: 1 },
+  });
+  expect(rolled.status).toBe(200);
+  expect(rolled.json.report.version).toBe(3);
+  expect(rolled.json.report.status).toBe("published"); // 公開中は公開のまま差し替え
+  expect(rolled.json.url).toBe(`${BASE}/r/${id}/`);
+  const source = await call(env.app, "GET", `/reports/${id}/source`, { user: "alice" });
+  expect(source.json.html).toContain("first body");
+
+  // rollback もフルスキャンを通る: block になれば rejected
+  env.scanner.next = {
+    verdict: "block",
+    findings: [{ ruleId: "eval-atob", severity: "block", message: "decode-and-execute chain" }],
+  };
+  const blocked = await call(env.app, "POST", `/reports/${id}/rollback`, {
+    user: "alice",
+    body: { version: 2 },
+  });
+  expect(blocked.status).toBe(200);
+  expect(blocked.json.report.status).toBe("rejected");
+  expect(blocked.json.report.versions).toEqual([]);
+  expect((await call(env.app, "GET", `/reports/${id}`)).status).toBe(404);
+});
+
+test("rollback works for zip reports (original zip bytes are re-ingested)", async () => {
+  const env = makeEnv();
+  const { id } = await upload(env, "alice", "Zip Rollback", "<html><body>zip v1</body></html>", "zip");
+  const urlRes = await call(env.app, "POST", `/reports/${id}/upload-url`, {
+    user: "alice",
+    body: { kind: "zip" },
+  });
+  await env.ctx.storage.putStagingObject(
+    urlRes.json.upload.key,
+    new TextEncoder().encode("<html><body>zip v2</body></html>"),
+  );
+  await call(env.app, "POST", `/reports/${id}/complete`, {
+    user: "alice",
+    body: { key: urlRes.json.upload.key },
+  });
+
+  const rolled = await call(env.app, "POST", `/reports/${id}/rollback`, {
+    user: "alice",
+    body: { version: 1 },
+  });
+  expect(rolled.status).toBe(200);
+  expect(rolled.json.report.version).toBe(3);
+  expect(rolled.json.report.kind).toBe("zip");
+  const v3 = await call(env.app, "GET", `/reports/${id}/versions/3/source`, { user: "alice" });
+  expect(v3.json.kind).toBe("zip");
+  expect(v3.json.html).toContain("zip v1");
+});
+
+// =====================
 // Admin takedown
 // =====================
 
@@ -636,6 +1171,55 @@ test("GET /admin/flagged lists flagged reports; DELETE .../flags resolves them",
   expect((await call(env.app, "GET", "/admin/flagged", { user: "admin" })).json.items).toHaveLength(0);
 });
 
+test("GET /admin/flagged paginates with limit/cursor", async () => {
+  const env = makeEnv();
+  const a = await uploadPublished(env, "alice", "Flagged A");
+  const b = await uploadPublished(env, "alice", "Flagged B");
+  await call(env.app, "POST", `/reports/${a.id}/flag`, { body: { reason: "通報A" }, ip: "10.1.1.1" });
+  await call(env.app, "POST", `/reports/${b.id}/flag`, { body: { reason: "通報B" }, ip: "10.1.1.2" });
+
+  const first = await call(env.app, "GET", "/admin/flagged?limit=1", { user: "admin" });
+  expect(first.status).toBe(200);
+  expect(first.json.items).toHaveLength(1);
+  expect(first.json.nextCursor).toBeDefined();
+
+  const second = await call(
+    env.app,
+    "GET",
+    `/admin/flagged?limit=1&cursor=${first.json.nextCursor}`,
+    { user: "admin" },
+  );
+  expect(second.status).toBe(200);
+  expect(second.json.items).toHaveLength(1);
+  expect(second.json.nextCursor).toBeUndefined();
+  // 2ページで両方のレポートが重複なく返る
+  const ids = [first.json.items[0].report.id, second.json.items[0].report.id];
+  expect(ids.sort()).toEqual([a.id, b.id].sort());
+
+  const bad = await call(env.app, "GET", "/admin/flagged?cursor=oops", { user: "admin" });
+  expect(bad.status).toBe(400);
+  expect(bad.json.error.code).toBe("bad_request");
+});
+
+test("GET /admin/reports filters by status server-side", async () => {
+  const env = makeEnv();
+  await uploadPublished(env, "alice", "公開中レポート");
+  await upload(env, "alice", "非公開レポート");
+
+  const published = await call(env.app, "GET", "/admin/reports?status=published", { user: "admin" });
+  expect(published.status).toBe(200);
+  expect(published.json.reports.map((r: any) => r.title)).toEqual(["公開中レポート"]);
+
+  const priv = await call(env.app, "GET", "/admin/reports?status=private", { user: "admin" });
+  expect(priv.json.reports.map((r: any) => r.title)).toEqual(["非公開レポート"]);
+
+  const all = await call(env.app, "GET", "/admin/reports", { user: "admin" });
+  expect(all.json.reports).toHaveLength(2);
+
+  const invalid = await call(env.app, "GET", "/admin/reports?status=nope", { user: "admin" });
+  expect(invalid.status).toBe(400);
+});
+
 // =====================
 // Admin users
 // =====================
@@ -682,6 +1266,31 @@ test("admin user deletion: cascades into owned reports", async () => {
   expect(list.json.reports.map((r: any) => r.id)).toEqual([kept.id]);
   const search = await call(env.app, "GET", "/search?q=Alice");
   expect(search.json.results).toEqual([]);
+});
+
+test("admin user deletion: revokes the user's API keys (other users' keys survive)", async () => {
+  const env = makeEnv();
+  // makeEnv() は apiKeys を配線しないので、このテスト専用に配線した app を作る。
+  const app = createApp({
+    service: env.ctx.service,
+    auth: env.ctx.auth,
+    userAdmin: env.ctx.userAdmin,
+    apiKeys: env.ctx.apiKeys,
+    contentBaseUrl: BASE,
+  });
+  const aliceKey = await call(app, "POST", "/me/api-keys", { user: "alice", body: { name: "mcp" } });
+  expect(aliceKey.status).toBe(201);
+  const bobKey = await call(app, "POST", "/me/api-keys", { user: "bob", body: { name: "mcp" } });
+  expect(bobKey.status).toBe(201);
+  expect(await env.ctx.apiKeys.verify(aliceKey.json.plaintext)).not.toBeNull();
+
+  const res = await call(app, "DELETE", "/admin/users/alice", { user: "admin" });
+  expect(res.status).toBe(200);
+
+  // 削除されたユーザーのキーは verify で解決されなくなる（ゴースト sub 防止）。
+  expect(await env.ctx.apiKeys.verify(aliceKey.json.plaintext)).toBeNull();
+  // 他ユーザーのキーは影響を受けない。
+  expect(await env.ctx.apiKeys.verify(bobKey.json.plaintext)).not.toBeNull();
 });
 
 test("admin user deletion: guards (self 400, unknown 404, non-admin 403)", async () => {

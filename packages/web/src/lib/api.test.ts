@@ -48,10 +48,16 @@ describe("ApiClient", () => {
     const client = new ApiClient({ fetchFn });
     await client.search("日本語 query");
     expect(calls[0]?.url).toBe(`/api/search?${new URLSearchParams({ q: "日本語 query" })}`);
+    await client.search("q2", { limit: 5, cursor: "20" });
+    expect(calls[1]?.url).toBe("/api/search?q=q2&limit=5&cursor=20");
     await client.listReports({ limit: 10, cursor: "abc" });
-    expect(calls[1]?.url).toBe("/api/reports?limit=10&cursor=abc");
+    expect(calls[2]?.url).toBe("/api/reports?limit=10&cursor=abc");
+    await client.listReports({ order: "asc", kind: "zip", limit: 10 });
+    expect(calls[3]?.url).toBe("/api/reports?order=asc&kind=zip&limit=10");
+    await client.listReports({ tag: "月次" });
+    expect(calls[4]?.url).toBe(`/api/reports?${new URLSearchParams({ tag: "月次" })}`);
     await client.listReports();
-    expect(calls[2]?.url).toBe("/api/reports");
+    expect(calls[5]?.url).toBe("/api/reports");
   });
 
   test("POST bodies are JSON with content-type", async () => {
@@ -68,6 +74,21 @@ describe("ApiClient", () => {
     const client = new ApiClient({ fetchFn });
     await client.getReport("abc/../x");
     expect(calls[0]?.url).toBe(`/api/reports/${encodeURIComponent("abc/../x")}`);
+  });
+
+  test("admin list endpoints serialize status/limit/cursor query params", async () => {
+    const { calls, fetchFn } = mockFetch(200, { reports: [], items: [], users: [] });
+    const client = new ApiClient({ fetchFn });
+    await client.adminListReports({ status: "published", limit: 50, cursor: "50" });
+    expect(calls[0]?.url).toBe("/api/admin/reports?status=published&limit=50&cursor=50");
+    await client.adminListReports();
+    expect(calls[1]?.url).toBe("/api/admin/reports");
+    await client.adminListFlagged({ limit: 50, cursor: "50" });
+    expect(calls[2]?.url).toBe("/api/admin/flagged?limit=50&cursor=50");
+    await client.adminListFlagged();
+    expect(calls[3]?.url).toBe("/api/admin/flagged");
+    await client.adminListUsers({ limit: 50, cursor: "abc" });
+    expect(calls[4]?.url).toBe("/api/admin/users?limit=50&cursor=abc");
   });
 
   test("admin setAdmin uses PUT to grant / DELETE to revoke", async () => {

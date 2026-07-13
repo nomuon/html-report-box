@@ -18,6 +18,7 @@ function report(status: OwnedReport["status"], findings: OwnedReport["findings"]
     id: "A".repeat(21),
     title: "t",
     description: "",
+    tags: [],
     ownerSub: "dev-alice",
     ownerName: "Alice",
     status,
@@ -26,6 +27,7 @@ function report(status: OwnedReport["status"], findings: OwnedReport["findings"]
     createdAt: "2026-07-10T00:00:00Z",
     updatedAt: "2026-07-10T00:00:00Z",
     findings,
+    versions: [],
   };
 }
 
@@ -72,6 +74,15 @@ describe("dropzoneReducer", () => {
       file,
     });
     expect(s).toEqual({ phase: "rejected", findings });
+  });
+
+  test("CANCEL_UPLOAD returns uploading to selected (file kept); ignored elsewhere", () => {
+    const s = run([{ type: "CANCEL_UPLOAD" }], { phase: "uploading", file, percent: 40 });
+    expect(s).toEqual({ phase: "selected", file });
+    // scanning 以降（complete 呼び出し後）はキャンセル不可
+    const scanning: DropzoneState = { phase: "scanning", file };
+    expect(run([{ type: "CANCEL_UPLOAD" }], scanning)).toEqual(scanning);
+    expect(run([{ type: "CANCEL_UPLOAD" }])).toEqual(DROPZONE_INITIAL);
   });
 
   test("FAIL during upload/scanning returns to idle; RESET always resets", () => {

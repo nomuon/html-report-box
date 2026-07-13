@@ -5,10 +5,11 @@ import {
   ALLOWED_FONT_HOSTS,
   CompleteReportRequestSchema,
   CreateReportRequestSchema,
-  DAILY_UPLOAD_LIMIT,
   ErrorResponseSchema,
   FlagReportRequestSchema,
   GetConfigResponseSchema,
+  GetQuotaResponseSchema,
+  ListReportsQuerySchema,
   isAllowedCdnHost,
   isAllowedZipEntryExtension,
   makeError,
@@ -19,8 +20,11 @@ import {
   OwnedReportSchema,
   PresignedUploadSchema,
   PublicReportSchema,
+  REPORT_TAG_MAX,
+  REPORT_TAGS_MAX,
   ReportIdSchema,
   ReportMetaSchema,
+  ReportTagsSchema,
   ScanVerdictSchema,
   SearchQuerySchema,
   toOwnedReport,
@@ -33,6 +37,7 @@ const validMeta: ReportMeta = {
   id: "V1StGXR8_Z5jdHi6B-myT",
   title: "月次売上レポート",
   description: "2026年6月の売上サマリ",
+  tags: ["売上", "月次"],
   ownerSub: "google_1234567890",
   ownerName: "Alice",
   status: "published",
@@ -44,6 +49,7 @@ const validMeta: ReportMeta = {
   updatedAt: "2026-07-10T12:34:56.000Z",
   verdict: "pass",
   findings: [],
+  versions: [],
   sourceIp: "10.0.0.1",
   userAgent: "Mozilla/5.0",
 };
@@ -80,10 +86,16 @@ describe("ReportMetaSchema", () => {
     expect(ReportMetaSchema.safeParse({ ...validMeta, title: "  " }).success).toBe(false);
   });
 
-  test("all four statuses are accepted", () => {
-    for (const status of ["private", "published", "rejected", "takedown"]) {
+  test("all five statuses are accepted", () => {
+    for (const status of ["private", "published", "unlisted", "rejected", "takedown"]) {
       expect(ReportMetaSchema.safeParse({ ...validMeta, status }).success).toBe(true);
     }
+  });
+
+  test("tags default to [] when omitted (後方互換)", () => {
+    const { tags: _t, ...rest } = validMeta;
+    expect(ReportMetaSchema.parse(rest).tags).toEqual([]);
+    expect(ReportMetaSchema.parse(validMeta).tags).toEqual(["売上", "月次"]);
   });
 
   test("findings require ruleId/severity/message", () => {
@@ -144,6 +156,34 @@ describe("error shape", () => {
   });
 });
 
+describe("ReportTagsSchema (タグ正規化)", () => {
+  test("trims, drops empties and dedupes (first-appearance order)", () => {
+    expect(ReportTagsSchema.parse([" 売上 ", "", "  ", "月次", "売上"])).toEqual(["売上", "月次"]);
+  });
+
+  test("boundaries: 30 chars ok / 31 rejected; 10 tags ok / 11 rejected", () => {
+    expect(ReportTagsSchema.parse(["x".repeat(REPORT_TAG_MAX)])).toEqual([
+      "x".repeat(REPORT_TAG_MAX),
+    ]);
+    expect(ReportTagsSchema.safeParse(["x".repeat(REPORT_TAG_MAX + 1)]).success).toBe(false);
+
+    const ten = Array.from({ length: REPORT_TAGS_MAX }, (_, i) => `t${i}`);
+    expect(ReportTagsSchema.parse(ten)).toEqual(ten);
+    expect(ReportTagsSchema.safeParse([...ten, "over"]).success).toBe(false);
+    // 上限判定は正規化（重複除去）前の raw 配列長で行われる（MCP 入力と同じ規約）
+    expect(ReportTagsSchema.safeParse([...ten, "t0"]).success).toBe(false);
+    expect(ReportTagsSchema.parse([...ten.slice(0, REPORT_TAGS_MAX - 1), "t0"])).toEqual(
+      ten.slice(0, REPORT_TAGS_MAX - 1),
+    );
+  });
+
+  test("trim 前が31文字でも trim 後30文字以内なら通る", () => {
+    expect(ReportTagsSchema.parse([` ${"x".repeat(REPORT_TAG_MAX)}`])).toEqual([
+      "x".repeat(REPORT_TAG_MAX),
+    ]);
+  });
+});
+
 describe("API request schemas", () => {
   test("CreateReportRequest: title required, description defaults", () => {
     const parsed = CreateReportRequestSchema.parse({ title: "T", kind: "html" });
@@ -165,12 +205,51 @@ describe("API request schemas", () => {
     expect(UpdateReportRequestSchema.safeParse({ description: "" }).success).toBe(true);
   });
 
+  test("CreateReportRequest: tags default to [] and are normalized", () => {
+    expect(CreateReportRequestSchema.parse({ title: "T", kind: "html" }).tags).toEqual([]);
+    expect(
+      CreateReportRequestSchema.parse({ title: "T", kind: "html", tags: [" a ", "a", ""] }).tags,
+    ).toEqual(["a"]);
+  });
+
+  test("UpdateReportRequest accepts a tags-only patch ([] = 全削除)", () => {
+    expect(UpdateReportRequestSchema.parse({ tags: ["再編", "再編"] }).tags).toEqual(["再編"]);
+    expect(UpdateReportRequestSchema.parse({ tags: [] }).tags).toEqual([]);
+    expect(UpdateReportRequestSchema.parse({ title: "t" }).tags).toBeUndefined();
+  });
+
+  test("ListReportsQuery accepts tag and rejects blank / over-long values", () => {
+    expect(ListReportsQuerySchema.parse({ tag: " 月次 " }).tag).toBe("月次");
+    expect(ListReportsQuerySchema.parse({}).tag).toBeUndefined();
+    expect(ListReportsQuerySchema.safeParse({ tag: "  " }).success).toBe(false);
+    expect(ListReportsQuerySchema.safeParse({ tag: "x".repeat(REPORT_TAG_MAX + 1) }).success).toBe(
+      false,
+    );
+  });
+
   test("SearchQuery: q required, trimmed, limit coerced from string", () => {
     const parsed = SearchQuerySchema.parse({ q: " 東京 ", limit: "10" });
     expect(parsed.q).toBe("東京");
     expect(parsed.limit).toBe(10);
     expect(SearchQuerySchema.safeParse({ q: "   " }).success).toBe(false);
     expect(SearchQuerySchema.safeParse({ q: "a", limit: "0" }).success).toBe(false);
+  });
+
+  test("SearchQuery accepts an optional continuation cursor", () => {
+    expect(SearchQuerySchema.parse({ q: "a", cursor: "20" }).cursor).toBe("20");
+    expect(SearchQuerySchema.parse({ q: "a" }).cursor).toBeUndefined();
+    expect(SearchQuerySchema.safeParse({ q: "a", cursor: "" }).success).toBe(false);
+  });
+
+  test("ListReportsQuery accepts order/kind and rejects unknown values", () => {
+    expect(ListReportsQuerySchema.parse({ order: "asc", kind: "zip", limit: "5" })).toEqual({
+      order: "asc",
+      kind: "zip",
+      limit: 5,
+    });
+    expect(ListReportsQuerySchema.parse({})).toEqual({});
+    expect(ListReportsQuerySchema.safeParse({ order: "up" }).success).toBe(false);
+    expect(ListReportsQuerySchema.safeParse({ kind: "tar" }).success).toBe(false);
   });
 
   test("CompleteReportRequest requires staging key", () => {
@@ -201,7 +280,7 @@ describe("API response schemas", () => {
         maxZipSizeBytes: MAX_ZIP_SIZE_BYTES,
         maxZipUncompressedBytes: MAX_ZIP_UNCOMPRESSED_BYTES,
         maxZipEntries: MAX_ZIP_ENTRIES,
-        dailyUploadLimit: DAILY_UPLOAD_LIMIT,
+        dailyUploadLimit: null,
       },
     };
     expect(
@@ -223,6 +302,33 @@ describe("API response schemas", () => {
     expect(GetConfigResponseSchema.safeParse({ ...base, auth: { mode: "iam" } }).success).toBe(
       false,
     );
+  });
+
+  test("GetQuotaResponse: usedToday/remaining are nonnegative", () => {
+    expect(
+      GetQuotaResponseSchema.safeParse({
+        dailyUploadLimit: 30,
+        usedToday: 0,
+        remaining: 30,
+      }).success,
+    ).toBe(true);
+    expect(
+      GetQuotaResponseSchema.safeParse({
+        dailyUploadLimit: 30,
+        usedToday: 30,
+        remaining: -1,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("GetQuotaResponse: 無制限（null）を受理する", () => {
+    expect(
+      GetQuotaResponseSchema.safeParse({
+        dailyUploadLimit: null,
+        usedToday: 42,
+        remaining: null,
+      }).success,
+    ).toBe(true);
   });
 
   test("PresignedUpload shape", () => {
@@ -303,7 +409,6 @@ describe("constants", () => {
     expect(MAX_ZIP_SIZE_BYTES).toBe(20 * 1024 * 1024);
     expect(MAX_ZIP_UNCOMPRESSED_BYTES).toBe(100 * 1024 * 1024);
     expect(MAX_ZIP_ENTRIES).toBe(200);
-    expect(DAILY_UPLOAD_LIMIT).toBe(30);
   });
 
   test("zip entry extension allowlist", () => {

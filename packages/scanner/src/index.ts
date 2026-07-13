@@ -6,7 +6,7 @@
  */
 export const PACKAGE_NAME = "@hrb/scanner";
 
-export { createScanner, type CreateScannerOptions } from "./scanner.ts";
+export { createScanner, ZIP_ERROR_RULE_IDS, type CreateScannerOptions } from "./scanner.ts";
 export { createZipExtractor } from "./zip/extractor.ts";
 export {
   SECURITY_ZIP_CODES,

@@ -5,7 +5,7 @@
 import { join } from "node:path";
 import type { ReportMeta, ReportStatus } from "@hrb/shared";
 import { DomainError } from "../errors.ts";
-import type { Page, PageOptions, ReportFlag, ReportRepository } from "../ports.ts";
+import type { Page, PageOptions, PublishedListOptions, ReportFlag, ReportRepository } from "../ports.ts";
 import { JsonStore } from "./json-store.ts";
 
 interface ReportsDb {
@@ -15,6 +15,8 @@ interface ReportsDb {
   /** key: `${ownerSub}#${dateKey}` */
   quotas: Record<string, number>;
   flags: Record<string, ReportFlag[]>;
+  /** key: report id → 累計閲覧数 */
+  views: Record<string, number>;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -46,11 +48,14 @@ export class LocalReportRepository implements ReportRepository {
       pending: {},
       quotas: {},
       flags: {},
+      views: {},
     }));
     // 2026-07 の可視性モデル刷新（processing / pending_review 廃止）前の dev
     // データを private に読み替える。旧レコードは sources/ を持たないため、
     // 再公開には再アップロードが必要（publish が conflict で案内する）。
     this.store.mutate((db) => {
+      // views フィールド追加前の dev データを空カウンタとして読み替える。
+      db.views ??= {};
       for (const meta of Object.values(db.reports)) {
         const legacy = meta.status as string;
         if (legacy === "processing" || legacy === "pending_review") meta.status = "private";
@@ -97,14 +102,22 @@ export class LocalReportRepository implements ReportRepository {
       delete db.tokens[id];
       delete db.pending[id];
       delete db.flags[id];
+      delete db.views[id];
     });
   }
 
-  async listPublished(opts?: PageOptions): Promise<Page<ReportMeta>> {
+  async listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>> {
     const all = Object.values(this.store.get().reports)
-      .filter((m) => m.status === "published")
+      .filter(
+        (m) =>
+          m.status === "published" &&
+          (opts?.kind === undefined || m.kind === opts.kind) &&
+          // tags を持たない旧レコードは空扱い（後方互換）
+          (opts?.tag === undefined || (m.tags ?? []).includes(opts.tag)),
+      )
       .sort(byUpdatedAtDesc)
       .map((m) => structuredClone(m));
+    if (opts?.order === "asc") all.reverse();
     return paginate(all, opts);
   }
 
@@ -161,6 +174,22 @@ export class LocalReportRepository implements ReportRepository {
       db.quotas[key] = next;
       return next;
     });
+  }
+
+  async getDailyUploads(ownerSub: string, dateKey: string): Promise<number> {
+    return this.store.get().quotas[`${ownerSub}#${dateKey}`] ?? 0;
+  }
+
+  async incrementViewCount(id: string): Promise<number> {
+    return this.store.mutate((db) => {
+      const next = (db.views[id] ?? 0) + 1;
+      db.views[id] = next;
+      return next;
+    });
+  }
+
+  async getViewCount(id: string): Promise<number> {
+    return this.store.get().views[id] ?? 0;
   }
 
   async addFlag(id: string, flag: ReportFlag): Promise<void> {

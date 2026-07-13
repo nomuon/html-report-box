@@ -85,6 +85,10 @@ export class LocalObjectStorage implements ObjectStorage {
     }
   }
 
+  async deleteContentObject(key: string): Promise<void> {
+    rmSync(this.pathFor(key), { force: true });
+  }
+
   async deleteContentPrefix(prefix: string): Promise<void> {
     // Prefixes are directory-shaped ("reports/<id>/").
     const path = this.pathFor(prefix.replace(/\/+$/, ""));

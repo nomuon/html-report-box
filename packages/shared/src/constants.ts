@@ -10,8 +10,9 @@ export const MAX_ZIP_UNCOMPRESSED_BYTES = 100 * 1024 * 1024; // 100MB total afte
 export const MAX_ZIP_ENTRIES = 200;
 export const MAX_ZIP_COMPRESSION_RATIO = 100; // reject > 100:1 (zip bomb)
 
-// ---- Rate limits ----
-export const DAILY_UPLOAD_LIMIT = 30; // uploads per user per day
+// ---- Version history ----
+/** 保持する原本バージョン数の上限。超過分は最古から間引かれる。 */
+export const REPORT_VERSION_HISTORY_LIMIT = 20;
 
 // ---- zip entry extension allowlist (lowercase, with leading dot) ----
 export const ZIP_ENTRY_ALLOWED_EXTENSIONS = [
@@ -70,6 +71,7 @@ export function isAllowedStyleHost(host: string): boolean {
 
 // ---- Search / tokenizer ----
 export const TOKEN_WEIGHT_TITLE = 8;
+export const TOKEN_WEIGHT_TAG = 6;
 export const TOKEN_WEIGHT_DESCRIPTION = 4;
 export const TOKEN_WEIGHT_BODY = 1;
 /** Max distinct tokens indexed per document. */

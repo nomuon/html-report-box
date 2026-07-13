@@ -7,5 +7,6 @@ export const PACKAGE_NAME = "@hrb/shared";
 export * from "./constants.ts";
 export * from "./tokenizer.ts";
 export * from "./report.ts";
+export * from "./scan-guidance.ts";
 export * from "./api.ts";
 export * from "./content-csp.ts";

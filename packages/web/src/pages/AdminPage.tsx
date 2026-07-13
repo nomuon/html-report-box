@@ -1,7 +1,7 @@
 /** 画面⑤: 管理画面 (`/admin`) — 通報 / 全レポート / ユーザー管理 */
 import { useState } from "react";
 import { Link } from "react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AdminReport, AdminUser, ReportStatus } from "@hrb/shared";
 import { REPORT_STATUSES } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
@@ -10,6 +10,7 @@ import { KindChip, STATUS_LABELS, StatusChip } from "../components/Chip.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Modal } from "../components/Modal.tsx";
+import { TableSkeleton } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import { isApiError } from "../lib/api.ts";
 import { formatDateTime } from "../lib/format.ts";
@@ -23,6 +24,29 @@ type Confirm =
   | null;
 
 const GENERIC_ERROR = "エラーが発生しました。時間をおいて再試行してください";
+const PAGE_LIMIT = 50;
+
+interface LoadMoreQuery {
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  fetchNextPage: () => Promise<unknown>;
+}
+
+/** useInfiniteQuery の次ページ読み込みボタン（次ページが無ければ非表示） */
+function LoadMore({ query }: { query: LoadMoreQuery }) {
+  if (!query.hasNextPage) return null;
+  return (
+    <div className="hrb-load-more">
+      <Button
+        variant="secondary"
+        loading={query.isFetchingNextPage}
+        onClick={() => void query.fetchNextPage()}
+      >
+        さらに読み込む
+      </Button>
+    </div>
+  );
+}
 
 function useAdminInvalidate() {
   const qc = useQueryClient();
@@ -39,78 +63,83 @@ function useAdminInvalidate() {
 function FlaggedTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
   const { api } = useApp();
   const [flagsFor, setFlagsFor] = useState<AdminReport | null>(null);
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: ["admin-flagged"],
-    queryFn: () => api.adminListFlagged(),
+    queryFn: ({ pageParam }) => api.adminListFlagged({ limit: PAGE_LIMIT, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
   });
-  const items = query.data?.items ?? [];
+  const items = query.data?.pages.flatMap((p) => p.items) ?? [];
 
-  if (query.isLoading) return <p className="hrb-loading">読み込み中…</p>;
+  if (query.isLoading) return <TableSkeleton columns={6} />;
   if (items.length === 0)
     return <EmptyState icon={<Icon name="check-circle" size={30} />} title="未対応の通報はありません" />;
 
   return (
-    <div className="hrb-table-wrap">
-      <table className="hrb-table">
-        <thead>
-          <tr>
-            <th>タイトル</th>
-            <th>作成者</th>
-            <th>ステータス</th>
-            <th>通報</th>
-            <th>最終通報日時</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map(({ report: r, flags }) => {
-            const latest = flags.reduce((max, f) => (f.createdAt > max ? f.createdAt : max), "");
-            return (
-              <tr key={r.id}>
-                <td>
-                  <Link to={`/reports/${r.id}`} className="hrb-table__title">
-                    {r.title}
-                  </Link>
-                </td>
-                <td>{r.ownerName}</td>
-                <td>
-                  <StatusChip status={r.status} />
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="hrb-flag-count"
-                    title={flags[flags.length - 1]?.reason}
-                    onClick={() => setFlagsFor(r)}
-                  >
-                    <Icon name="flag" size={14} />
-                    {flags.length}件
-                  </button>
-                </td>
-                <td className="hrb-table__date">{latest ? formatDateTime(latest) : "-"}</td>
-                <td>
-                  <div className="hrb-row-actions">
-                    <Link to={`/reports/${r.id}`} target="_blank" rel="noreferrer">
-                      <Button variant="secondary">プレビュー</Button>
+    <div>
+      <div className="hrb-table-wrap">
+        <table className="hrb-table">
+          <thead>
+            <tr>
+              <th>タイトル</th>
+              <th>作成者</th>
+              <th>ステータス</th>
+              <th>通報</th>
+              <th>最終通報日時</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map(({ report: r, flags }) => {
+              const latest = flags.reduce((max, f) => (f.createdAt > max ? f.createdAt : max), "");
+              return (
+                <tr key={r.id}>
+                  <td>
+                    <Link to={`/reports/${r.id}`} className="hrb-table__title">
+                      {r.title}
                     </Link>
-                    {r.status === "published" && (
-                      <Button
-                        variant="danger"
-                        onClick={() => onConfirm({ kind: "takedown", report: r })}
-                      >
-                        テイクダウン
+                  </td>
+                  <td>{r.ownerName}</td>
+                  <td>
+                    <StatusChip status={r.status} />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="hrb-flag-count"
+                      title={flags[flags.length - 1]?.reason}
+                      onClick={() => setFlagsFor(r)}
+                    >
+                      <Icon name="flag" size={14} />
+                      {flags.length}件
+                    </button>
+                  </td>
+                  <td className="hrb-table__date">{latest ? formatDateTime(latest) : "-"}</td>
+                  <td>
+                    <div className="hrb-row-actions">
+                      <Link to={`/reports/${r.id}`} target="_blank" rel="noreferrer">
+                        <Button variant="secondary">プレビュー</Button>
+                      </Link>
+                      {(r.status === "published" || r.status === "unlisted") && (
+                        <Button
+                          variant="danger"
+                          onClick={() => onConfirm({ kind: "takedown", report: r })}
+                        >
+                          テイクダウン
+                        </Button>
+                      )}
+                      <Button variant="ghost" onClick={() => onConfirm({ kind: "clear-flags", report: r })}>
+                        通報を解決
                       </Button>
-                    )}
-                    <Button variant="ghost" onClick={() => onConfirm({ kind: "clear-flags", report: r })}>
-                      通報を解決
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <LoadMore query={query} />
       {flagsFor && <FlagsModal report={flagsFor} onClose={() => setFlagsFor(null)} />}
     </div>
   );
@@ -145,42 +174,43 @@ function FlagsModal({ report, onClose }: { report: AdminReport; onClose: () => v
 
 function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
   const { api } = useApp();
-  const [statusFilter, setStatusFilter] = useState<Set<ReportStatus>>(new Set());
+  // undefined = すべて（サーバー側 status フィルタ未指定）
+  const [status, setStatus] = useState<ReportStatus | undefined>(undefined);
 
-  const query = useQuery({
-    queryKey: ["admin-reports", "all"],
-    queryFn: () => api.adminListReports({ limit: 100 }),
+  const query = useInfiniteQuery({
+    queryKey: ["admin-reports", status ?? "all"],
+    queryFn: ({ pageParam }) =>
+      api.adminListReports({ status, limit: PAGE_LIMIT, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
   });
-  const all = query.data?.reports ?? [];
-  const reports =
-    statusFilter.size === 0 ? all : all.filter((r) => statusFilter.has(r.status));
-
-  const toggle = (s: ReportStatus) => {
-    setStatusFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s);
-      else next.add(s);
-      return next;
-    });
-  };
+  const reports = query.data?.pages.flatMap((p) => p.reports) ?? [];
 
   return (
     <div>
       <div className="hrb-filter-chips" role="group" aria-label="status フィルタ">
+        <button
+          type="button"
+          className={`hrb-filter-chip ${status === undefined ? "hrb-filter-chip--active" : ""}`}
+          aria-pressed={status === undefined}
+          onClick={() => setStatus(undefined)}
+        >
+          すべて
+        </button>
         {REPORT_STATUSES.map((s) => (
           <button
             key={s}
             type="button"
-            className={`hrb-filter-chip ${statusFilter.has(s) ? "hrb-filter-chip--active" : ""}`}
-            aria-pressed={statusFilter.has(s)}
-            onClick={() => toggle(s)}
+            className={`hrb-filter-chip ${status === s ? "hrb-filter-chip--active" : ""}`}
+            aria-pressed={status === s}
+            onClick={() => setStatus(s)}
           >
             {STATUS_LABELS[s]}
           </button>
         ))}
       </div>
 
-      {query.isLoading && <p className="hrb-loading">読み込み中…</p>}
+      {query.isLoading && <TableSkeleton columns={6} />}
       {!query.isLoading && reports.length === 0 && (
         <EmptyState icon={<Icon name="inbox" size={30} />} title="レポートがありません" />
       )}
@@ -216,7 +246,7 @@ function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
                   <td className="hrb-table__date">{formatDateTime(r.updatedAt)}</td>
                   <td>
                     <div className="hrb-row-actions">
-                      {r.status === "published" && (
+                      {(r.status === "published" || r.status === "unlisted") && (
                         <Button
                           variant="danger"
                           onClick={() => onConfirm({ kind: "takedown", report: r })}
@@ -232,6 +262,8 @@ function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
           </table>
         </div>
       )}
+
+      <LoadMore query={query} />
     </div>
   );
 }
@@ -241,58 +273,63 @@ function AllReportsTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
 function UsersTab({ onConfirm }: { onConfirm: (c: Confirm) => void }) {
   const { api } = useApp();
   const session = useSession();
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: ["admin-users"],
-    queryFn: () => api.adminListUsers({ limit: 100 }),
+    queryFn: ({ pageParam }) => api.adminListUsers({ limit: PAGE_LIMIT, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor,
   });
-  const users = query.data?.users ?? [];
+  const users = query.data?.pages.flatMap((p) => p.users) ?? [];
 
-  if (query.isLoading) return <p className="hrb-loading">読み込み中…</p>;
+  if (query.isLoading) return <TableSkeleton columns={4} />;
   if (users.length === 0)
     return <EmptyState icon={<Icon name="users" size={30} />} title="ユーザーがいません" />;
 
   return (
-    <div className="hrb-table-wrap">
-      <table className="hrb-table">
-        <thead>
-          <tr>
-            <th>ユーザー名</th>
-            <th>メール</th>
-            <th>権限</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.username}>
-              <td>{u.name ?? u.username}</td>
-              <td>{u.email ?? "-"}</td>
-              <td>{u.isAdmin ? <span className="hrb-chip hrb-chip--kind">admin</span> : "-"}</td>
-              <td>
-                <div className="hrb-row-actions">
-                  <Button
-                    variant={u.isAdmin ? "danger" : "secondary"}
-                    onClick={() => onConfirm({ kind: "set-admin", user: u, isAdmin: !u.isAdmin })}
-                  >
-                    {u.isAdmin ? "admin 剥奪" : "admin 付与"}
-                  </Button>
-                  {u.username === session?.name ? (
-                    <span className="hrb-tip" data-tip="自分自身のアカウントは削除できません" tabIndex={0}>
-                      <Button variant="ghost" disabled>
+    <div>
+      <div className="hrb-table-wrap">
+        <table className="hrb-table">
+          <thead>
+            <tr>
+              <th>ユーザー名</th>
+              <th>メール</th>
+              <th>権限</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.username}>
+                <td>{u.name ?? u.username}</td>
+                <td>{u.email ?? "-"}</td>
+                <td>{u.isAdmin ? <span className="hrb-chip hrb-chip--kind">admin</span> : "-"}</td>
+                <td>
+                  <div className="hrb-row-actions">
+                    <Button
+                      variant={u.isAdmin ? "danger" : "secondary"}
+                      onClick={() => onConfirm({ kind: "set-admin", user: u, isAdmin: !u.isAdmin })}
+                    >
+                      {u.isAdmin ? "admin 剥奪" : "admin 付与"}
+                    </Button>
+                    {u.username === session?.username ? (
+                      <span className="hrb-tip" data-tip="自分自身のアカウントは削除できません" tabIndex={0}>
+                        <Button variant="ghost" disabled>
+                          削除
+                        </Button>
+                      </span>
+                    ) : (
+                      <Button variant="danger" onClick={() => onConfirm({ kind: "delete-user", user: u })}>
                         削除
                       </Button>
-                    </span>
-                  ) : (
-                    <Button variant="danger" onClick={() => onConfirm({ kind: "delete-user", user: u })}>
-                      削除
-                    </Button>
-                  )}
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <LoadMore query={query} />
     </div>
   );
 }

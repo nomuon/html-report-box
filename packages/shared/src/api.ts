@@ -10,9 +10,14 @@ import {
   PublicReportSchema,
   ReportDescriptionSchema,
   ReportFlagSchema,
+  REPORT_TAG_MAX,
   ReportKindSchema,
   ReportStatusSchema,
+  ReportTagsSchema,
   ReportTitleSchema,
+  ReportVersionSchema,
+  ScanFindingSchema,
+  ScanVerdictSchema,
 } from "./report.ts";
 
 // =====================
@@ -146,7 +151,8 @@ export const GetConfigResponseSchema = z.object({
     maxZipSizeBytes: z.number().int().positive(),
     maxZipUncompressedBytes: z.number().int().positive(),
     maxZipEntries: z.number().int().positive(),
-    dailyUploadLimit: z.number().int().positive(),
+    /** null = 無制限（HRB_DAILY_UPLOAD_LIMIT 未設定時の既定）。 */
+    dailyUploadLimit: z.number().int().positive().nullable(),
   }),
 });
 export type GetConfigResponse = z.infer<typeof GetConfigResponseSchema>;
@@ -154,7 +160,17 @@ export type GetConfigResponse = z.infer<typeof GetConfigResponseSchema>;
 // =====================
 // GET /reports (public list, published only)
 // =====================
-export const ListReportsQuerySchema = PaginationQuerySchema;
+/** updatedAt sort order for list endpoints (default: desc = newest first). */
+export const LIST_ORDERS = ["desc", "asc"] as const;
+export const ListOrderSchema = z.enum(LIST_ORDERS);
+export type ListOrder = z.infer<typeof ListOrderSchema>;
+
+export const ListReportsQuerySchema = PaginationQuerySchema.extend({
+  order: ListOrderSchema.optional(),
+  kind: ReportKindSchema.optional(),
+  /** 単一タグの完全一致絞り込み。 */
+  tag: z.string().trim().min(1).max(REPORT_TAG_MAX).optional(),
+});
 export type ListReportsQuery = z.infer<typeof ListReportsQuerySchema>;
 
 export const ListReportsResponseSchema = z.object({
@@ -170,6 +186,8 @@ export const SEARCH_QUERY_MAX = 200;
 export const SearchQuerySchema = z.object({
   q: z.string().trim().min(1).max(SEARCH_QUERY_MAX),
   limit: z.coerce.number().int().min(1).max(50).optional(),
+  /** Opaque continuation cursor (SearchResponse.nextCursor of the previous page). */
+  cursor: z.string().min(1).optional(),
 });
 export type SearchQuery = z.infer<typeof SearchQuerySchema>;
 
@@ -184,6 +202,8 @@ export type SearchResult = z.infer<typeof SearchResultSchema>;
 
 export const SearchResponseSchema = z.object({
   results: z.array(SearchResultSchema),
+  /** Present when more ranked results remain beyond this page. */
+  nextCursor: z.string().optional(),
 });
 export type SearchResponse = z.infer<typeof SearchResponseSchema>;
 
@@ -192,8 +212,15 @@ export type SearchResponse = z.infer<typeof SearchResponseSchema>;
 // =====================
 export const GetReportResponseSchema = z.object({
   report: PublicReportSchema,
-  /** Content URL, e.g. https://content.example.com/r/<id>/ (absent unless published). */
+  /** True when the requesting viewer owns this report (false for anonymous / others / admin). */
+  isOwner: z.boolean(),
+  /** Content URL, e.g. https://content.example.com/r/<id>/ (absent unless published / unlisted). */
   url: z.string().optional(),
+  /** Latest scan outcome — owner/admin viewers only (never exposed publicly). */
+  verdict: ScanVerdictSchema.optional(),
+  findings: z.array(ScanFindingSchema).optional(),
+  /** 累計閲覧数 — owner/admin viewers only（他人には閲覧数を晒さない）。 */
+  viewCount: z.number().int().nonnegative().optional(),
 });
 export type GetReportResponse = z.infer<typeof GetReportResponseSchema>;
 
@@ -207,11 +234,25 @@ export const MyReportsResponseSchema = z.object({
 export type MyReportsResponse = z.infer<typeof MyReportsResponseSchema>;
 
 // =====================
+// GET /me/quota (auth) — 日次アップロード残数
+// =====================
+export const GetQuotaResponseSchema = z.object({
+  /** null = 無制限。 */
+  dailyUploadLimit: z.number().int().positive().nullable(),
+  /** 本日消費した件数（上限がある場合はその値で頭打ち）。 */
+  usedToday: z.number().int().nonnegative(),
+  /** 本日の残数。null = 無制限。 */
+  remaining: z.number().int().nonnegative().nullable(),
+});
+export type GetQuotaResponse = z.infer<typeof GetQuotaResponseSchema>;
+
+// =====================
 // POST /reports (auth) — create META (status=private) + issue presigned POST
 // =====================
 export const CreateReportRequestSchema = z.object({
   title: ReportTitleSchema,
   description: ReportDescriptionSchema.default(""),
+  tags: ReportTagsSchema.default([]),
   kind: ReportKindSchema,
 });
 export type CreateReportRequest = z.infer<typeof CreateReportRequestSchema>;
@@ -260,10 +301,22 @@ export const UpdateReportRequestSchema = z
   .object({
     title: ReportTitleSchema.optional(),
     description: ReportDescriptionSchema.optional(),
+    /** 省略時は変更なし（[] を渡すと全削除）。 */
+    tags: ReportTagsSchema.optional(),
+    /**
+     * 公開の有効期限（ISO 8601）。省略時は変更なし、null で無期限に戻す。
+     * 過去日時は validation エラー。
+     */
+    expiresAt: z.iso.datetime({ offset: true }).nullable().optional(),
   })
-  .refine((v) => v.title !== undefined || v.description !== undefined, {
-    message: "at least one of title/description is required",
-  });
+  .refine(
+    (v) =>
+      v.title !== undefined ||
+      v.description !== undefined ||
+      v.tags !== undefined ||
+      v.expiresAt !== undefined,
+    { message: "at least one of title/description/tags/expiresAt is required" },
+  );
 export type UpdateReportRequest = z.infer<typeof UpdateReportRequestSchema>;
 
 export const UpdateReportResponseSchema = z.object({
@@ -272,8 +325,24 @@ export const UpdateReportResponseSchema = z.object({
 export type UpdateReportResponse = z.infer<typeof UpdateReportResponseSchema>;
 
 // =====================
-// POST /reports/:id/publish (auth, owner or admin) — private → published
+// POST /reports/:id/publish (auth, owner or admin) — private → published / unlisted
+// (published⇔unlisted の切替も再呼び出しで可能。body 省略時は published)
 // =====================
+/** 公開範囲: published = 一覧・検索に表示 / unlisted = URL を知る人のみ。 */
+export const PUBLISH_VISIBILITIES = ["published", "unlisted"] as const;
+export const PublishVisibilitySchema = z.enum(PUBLISH_VISIBILITIES);
+export type PublishVisibility = z.infer<typeof PublishVisibilitySchema>;
+
+export const PublishReportRequestSchema = z.object({
+  visibility: PublishVisibilitySchema.default("published"),
+  /**
+   * 公開の有効期限（ISO 8601）。省略時は無期限（既存の期限もクリアされる）。
+   * 過去日時は validation エラー。失効後も再 publish で再設定/クリアできる。
+   */
+  expiresAt: z.iso.datetime({ offset: true }).optional(),
+});
+export type PublishReportRequest = z.infer<typeof PublishReportRequestSchema>;
+
 export const PublishReportResponseSchema = z.object({
   report: OwnedReportSchema,
   /** Content URL of the now-published report. */
@@ -282,7 +351,7 @@ export const PublishReportResponseSchema = z.object({
 export type PublishReportResponse = z.infer<typeof PublishReportResponseSchema>;
 
 // =====================
-// POST /reports/:id/unpublish (auth, owner or admin) — published → private
+// POST /reports/:id/unpublish (auth, owner or admin) — published / unlisted → private
 // =====================
 export const UnpublishReportResponseSchema = z.object({
   report: OwnedReportSchema,
@@ -315,6 +384,40 @@ export const UpdateReportContentResponseSchema = z.object({
 export type UpdateReportContentResponse = z.infer<typeof UpdateReportContentResponseSchema>;
 
 // =====================
+// GET /reports/:id/versions (auth, owner or admin) — バージョン履歴（新しい順）
+// =====================
+export const ListReportVersionsResponseSchema = z.object({
+  versions: z.array(ReportVersionSchema),
+});
+export type ListReportVersionsResponse = z.infer<typeof ListReportVersionsResponseSchema>;
+
+// =====================
+// GET /reports/:id/versions/:version/source (auth, owner or admin) — 旧版 HTML
+// =====================
+export const GetReportVersionSourceResponseSchema = z.object({
+  kind: ReportKindSchema,
+  /** html kind: 保存された原本。zip kind: 展開した root index.html（読み取り専用プレビュー）。 */
+  html: z.string(),
+});
+export type GetReportVersionSourceResponse = z.infer<typeof GetReportVersionSourceResponseSchema>;
+
+// =====================
+// POST /reports/:id/rollback (auth, owner or admin) — 旧版を新しい版として再取り込み
+// （editContent と同じパス: フルスキャン再実行・version は単調増加）
+// =====================
+export const RollbackReportRequestSchema = z.object({
+  version: z.number().int().min(1),
+});
+export type RollbackReportRequest = z.infer<typeof RollbackReportRequestSchema>;
+
+export const RollbackReportResponseSchema = z.object({
+  report: OwnedReportSchema,
+  /** Present when the report is (still) published. */
+  url: z.string().optional(),
+});
+export type RollbackReportResponse = z.infer<typeof RollbackReportResponseSchema>;
+
+// =====================
 // DELETE /reports/:id (auth, owner or admin)
 // =====================
 export const DeleteReportResponseSchema = OkResponseSchema;
@@ -331,6 +434,50 @@ export type FlagReportRequest = z.infer<typeof FlagReportRequestSchema>;
 
 export const FlagReportResponseSchema = OkResponseSchema;
 export type FlagReportResponse = z.infer<typeof FlagReportResponseSchema>;
+
+// =====================
+// API keys (/me/api-keys) — MCP 等のプログラマティックアクセス用 per-user キー
+// =====================
+export const API_KEY_NAME_MAX = 100;
+/** ユーザーあたりの発行上限。超過は conflict。 */
+export const MAX_API_KEYS_PER_USER = 10;
+
+export const ApiKeyNameSchema = z.string().trim().min(1).max(API_KEY_NAME_MAX);
+
+/** キーのメタデータ。平文は発行レスポンスで一度だけ返り、以後は取得できない。 */
+export const ApiKeySchema = z.object({
+  keyId: z.string().min(1),
+  name: ApiKeyNameSchema,
+  /** 平文キーの先頭数文字（一覧での識別用、e.g. "hrb_a1b2c3d4"）。 */
+  prefix: z.string().min(1),
+  createdAt: z.iso.datetime(),
+  /** verify で解決されるたびにベストエフォートで更新。 */
+  lastUsedAt: z.iso.datetime().optional(),
+});
+export type ApiKey = z.infer<typeof ApiKeySchema>;
+
+// GET /me/api-keys — 一覧（平文は含まない）
+export const ListApiKeysResponseSchema = z.object({
+  keys: z.array(ApiKeySchema),
+});
+export type ListApiKeysResponse = z.infer<typeof ListApiKeysResponseSchema>;
+
+// POST /me/api-keys — 発行（201。plaintext はこのレスポンス限り）
+export const CreateApiKeyRequestSchema = z.object({
+  name: ApiKeyNameSchema,
+});
+export type CreateApiKeyRequest = z.infer<typeof CreateApiKeyRequestSchema>;
+
+export const CreateApiKeyResponseSchema = z.object({
+  key: ApiKeySchema,
+  /** 平文キー（"hrb_" プレフィクス）。二度と取得できない。 */
+  plaintext: z.string().min(1),
+});
+export type CreateApiKeyResponse = z.infer<typeof CreateApiKeyResponseSchema>;
+
+// DELETE /me/api-keys/:keyId — 失効
+export const DeleteApiKeyResponseSchema = OkResponseSchema;
+export type DeleteApiKeyResponse = z.infer<typeof DeleteApiKeyResponseSchema>;
 
 // =====================
 // Admin
@@ -363,6 +510,7 @@ export type AdminFlaggedReport = z.infer<typeof AdminFlaggedReportSchema>;
 
 export const AdminListFlaggedResponseSchema = z.object({
   items: z.array(AdminFlaggedReportSchema),
+  nextCursor: z.string().optional(),
 });
 export type AdminListFlaggedResponse = z.infer<typeof AdminListFlaggedResponseSchema>;
 

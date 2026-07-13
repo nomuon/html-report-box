@@ -7,13 +7,15 @@ import { REPORT_ID_PATTERN } from "./constants.ts";
 // ---- Enums ----
 /**
  * Lifecycle:
- *   private   — exists but unlisted; owner/admin only (initial state, user can
+ *   private   — exists but hidden; owner/admin only (initial state, user can
  *               publish/unpublish freely)
  *   published — publicly listed, indexed and served
+ *   unlisted  — served like published, but never listed or indexed
+ *               (link-only sharing; anyone with the URL can view)
  *   rejected  — latest upload was blocked by the security scan
  *   takedown  — force-unpublished by an administrator
  */
-export const REPORT_STATUSES = ["private", "published", "rejected", "takedown"] as const;
+export const REPORT_STATUSES = ["private", "published", "unlisted", "rejected", "takedown"] as const;
 export const ReportStatusSchema = z.enum(REPORT_STATUSES);
 export type ReportStatus = z.infer<typeof ReportStatusSchema>;
 
@@ -46,6 +48,21 @@ export const ReportFlagSchema = z.object({
 });
 export type ReportFlag = z.infer<typeof ReportFlagSchema>;
 
+// ---- Version history entry (原本 sources/<id>/v<version> のメタデータ) ----
+export const ReportVersionSchema = z.object({
+  /** ReportMeta.version と同じ単調増加値。 */
+  version: z.number().int().min(1),
+  /**
+   * 取り込み時点の kind。上書きで kind が変わり得るため、rollback は
+   * この値でスキャン・展開する（zip を html として扱う事故を防ぐ）。
+   */
+  kind: ReportKindSchema,
+  createdAt: z.iso.datetime(),
+  sizeBytes: z.number().int().nonnegative(),
+  verdict: ScanVerdictSchema,
+});
+export type ReportVersion = z.infer<typeof ReportVersionSchema>;
+
 // ---- Report id ----
 export const ReportIdSchema = z.string().regex(REPORT_ID_PATTERN, "invalid report id");
 export type ReportId = z.infer<typeof ReportIdSchema>;
@@ -53,15 +70,38 @@ export type ReportId = z.infer<typeof ReportIdSchema>;
 // ---- Field limits ----
 export const REPORT_TITLE_MAX = 200;
 export const REPORT_DESCRIPTION_MAX = 2000;
+export const REPORT_TAGS_MAX = 10;
+export const REPORT_TAG_MAX = 30;
 
 export const ReportTitleSchema = z.string().trim().min(1).max(REPORT_TITLE_MAX);
 export const ReportDescriptionSchema = z.string().trim().max(REPORT_DESCRIPTION_MAX);
+
+/**
+ * タグ配列の正規化: 各タグを trim → 空文字を除外 → 重複を除去。
+ * 各タグは最大 REPORT_TAG_MAX 文字、入力配列は最大 REPORT_TAGS_MAX 個
+ * （上限は正規化前の raw 配列長で判定 — MCP 側の入力スキーマと同じ規約）。
+ */
+export const ReportTagsSchema = z
+  .array(z.string().trim().max(REPORT_TAG_MAX))
+  .max(REPORT_TAGS_MAX, { message: `at most ${REPORT_TAGS_MAX} tags are allowed` })
+  .transform((tags) => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const tag of tags) {
+      if (tag.length === 0 || seen.has(tag)) continue;
+      seen.add(tag);
+      out.push(tag);
+    }
+    return out;
+  });
 
 // ---- Full report metadata (internal record; DynamoDB META item shape) ----
 export const ReportMetaSchema = z.object({
   id: ReportIdSchema,
   title: ReportTitleSchema,
   description: ReportDescriptionSchema.default(""),
+  /** 整理用タグ（正規化済み）。tags を持たない既存データは空として扱う（後方互換）。 */
+  tags: ReportTagsSchema.default([]),
   /** Cognito sub (or dev user id in local mode) of the owner. */
   ownerSub: z.string().min(1),
   /** Display name denormalized from the IdP at upload time. */
@@ -79,9 +119,20 @@ export const ReportMetaSchema = z.object({
   sizeBytes: z.number().int().nonnegative().optional(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
+  /**
+   * 公開の有効期限（ISO 8601）。未設定は無期限。期限を過ぎた published /
+   * unlisted は読み取りパスで「公開されていない」扱いになる（遅延失効 —
+   * status 自体は書き換えない。ReportService.isExpired 参照）。
+   */
+  expiresAt: z.iso.datetime({ offset: true }).optional(),
   /** Result of the latest security scan. Absent until the first upload completes. */
   verdict: ScanVerdictSchema.optional(),
   findings: z.array(ScanFindingSchema).default([]),
+  /**
+   * 保持中の原本バージョン履歴（古い順、最大 REPORT_VERSION_HISTORY_LIMIT 件）。
+   * versions を持たない既存データは空履歴として扱う（後方互換）。
+   */
+  versions: z.array(ReportVersionSchema).default([]),
   /** Audit trail (never exposed publicly). */
   sourceIp: z.string().optional(),
   userAgent: z.string().optional(),
@@ -94,6 +145,7 @@ export const PublicReportSchema = ReportMetaSchema.omit({
   ownerSub: true,
   verdict: true,
   findings: true,
+  versions: true,
   sourceIp: true,
   userAgent: true,
 });
@@ -103,6 +155,9 @@ export type PublicReport = z.infer<typeof PublicReportSchema>;
 export const OwnedReportSchema = ReportMetaSchema.omit({
   sourceIp: true,
   userAgent: true,
+}).extend({
+  /** 累計閲覧数（オーナー向け一覧で付与。META には保存されないカウンタ由来）。 */
+  viewCount: z.number().int().nonnegative().optional(),
 });
 export type OwnedReport = z.infer<typeof OwnedReportSchema>;
 
@@ -114,6 +169,6 @@ export function toPublicReport(meta: ReportMeta): PublicReport {
   return PublicReportSchema.parse(meta);
 }
 
-export function toOwnedReport(meta: ReportMeta): OwnedReport {
+export function toOwnedReport(meta: ReportMeta & { viewCount?: number }): OwnedReport {
   return OwnedReportSchema.parse(meta);
 }

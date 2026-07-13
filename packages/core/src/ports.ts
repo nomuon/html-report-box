@@ -4,7 +4,9 @@
  */
 import type {
   AdminUser,
+  ApiKey,
   AuthConfig,
+  ListOrder,
   PresignedUpload,
   ReportFlag,
   ReportKind,
@@ -46,6 +48,38 @@ export interface SessionAuth {
   logout(token: string): Promise<void>;
 }
 
+// ---- Per-user API keys (MCP 等のプログラマティックアクセス) ----
+
+/** Key owner captured at issue time (name is denormalized like ReportMeta.ownerName). */
+export interface ApiKeyOwner {
+  sub: string;
+  name: string;
+}
+
+/** verify() resolution: which user a presented plaintext key belongs to. */
+export interface VerifiedApiKey {
+  ownerSub: string;
+  ownerName: string;
+  keyId: string;
+}
+
+/**
+ * Per-user API key store. Only the sha256 hash of a key is persisted; the
+ * plaintext is returned exactly once from issue().
+ */
+export interface ApiKeyStore {
+  issue(owner: ApiKeyOwner, name: string): Promise<{ key: ApiKey; plaintext: string }>;
+  /** Keys of one owner, newest first (metadata only — never the plaintext/hash). */
+  list(ownerSub: string): Promise<ApiKey[]>;
+  /** Throws DomainError("not_found") when the owner has no such key. */
+  revoke(ownerSub: string, keyId: string): Promise<void>;
+  /**
+   * Resolve a plaintext key to its owner (hash equality), or null when
+   * unknown/revoked. Updates lastUsedAt best-effort.
+   */
+  verify(plaintext: string): Promise<VerifiedApiKey | null>;
+}
+
 // ---- Pagination ----
 
 export interface PageOptions {
@@ -58,6 +92,16 @@ export interface Page<T> {
   nextCursor?: string;
 }
 
+/** Options for the public published list: sort order + kind / tag filters. */
+export interface PublishedListOptions extends PageOptions {
+  /** updatedAt sort order (default "desc" = newest first). */
+  order?: ListOrder;
+  /** Restrict results to one report kind. */
+  kind?: ReportKind;
+  /** Restrict results to reports carrying this exact tag. */
+  tag?: string;
+}
+
 // ---- Repository ----
 
 export type { ReportFlag };
@@ -68,10 +112,10 @@ export interface ReportRepository {
   get(id: string): Promise<ReportMeta | null>;
   getMany(ids: readonly string[]): Promise<Map<string, ReportMeta>>;
   update(meta: ReportMeta): Promise<void>;
-  /** Removes META, TOKENS, pending-upload pointer and flags for the id. */
+  /** Removes META, TOKENS, pending-upload pointer, flags and view counter for the id. */
   delete(id: string): Promise<void>;
-  /** status=published only, updatedAt descending. */
-  listPublished(opts?: PageOptions): Promise<Page<ReportMeta>>;
+  /** status=published only, updatedAt ordered (default descending), optional kind filter. */
+  listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>>;
   /** All statuses for one owner, updatedAt descending. */
   listByOwner(ownerSub: string, opts?: PageOptions): Promise<Page<ReportMeta>>;
   /** Admin: all reports, optional status filter, updatedAt descending. */
@@ -85,6 +129,12 @@ export interface ReportRepository {
   clearPendingUpload(id: string): Promise<void>;
   /** Returns the post-increment upload count for ownerSub on dateKey (UTC YYYY-MM-DD). */
   incrementDailyUploads(ownerSub: string, dateKey: string): Promise<number>;
+  /** Current upload count for ownerSub on dateKey (0 when nothing was uploaded). */
+  getDailyUploads(ownerSub: string, dateKey: string): Promise<number>;
+  /** Post-increment total view count（閲覧数カウンタ）. Callers may treat failures as best-effort. */
+  incrementViewCount(id: string): Promise<number>;
+  /** Current view count (0 when the report was never viewed). */
+  getViewCount(id: string): Promise<number>;
   addFlag(id: string, flag: ReportFlag): Promise<void>;
   listFlags(id: string): Promise<ReportFlag[]>;
   /** Every report id that currently has at least one flag (admin 通報一覧). */
@@ -133,6 +183,8 @@ export interface ObjectStorage {
   deleteStagingObject(key: string): Promise<void>;
   putContentObject(key: string, data: Uint8Array, contentType: string): Promise<void>;
   getContentObject(key: string): Promise<Uint8Array | null>;
+  /** Delete a single content object. Missing keys are a no-op. */
+  deleteContentObject(key: string): Promise<void>;
   /** Delete every content object whose key starts with `prefix`. */
   deleteContentPrefix(prefix: string): Promise<void>;
 }

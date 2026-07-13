@@ -7,6 +7,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Hono } from "hono";
+import type { ScanResult, SecurityScanner } from "@hrb/core";
 import { createLocalContext, getDevUser } from "@hrb/core/local";
 import type { LocalContext } from "@hrb/core/local";
 import { bearerApiKeyAuth, createMcpApp, MCP_SERVER_NAME } from "./index.ts";
@@ -110,10 +111,17 @@ describe("MCP protocol over Streamable HTTP (stateless)", () => {
     expect(result.capabilities.tools).toBeDefined();
   });
 
-  test("tools/list exposes the three tools", async () => {
+  test("tools/list exposes the six tools", async () => {
     const result = await rpcResult(app, "tools/list", {});
     const names = result.tools.map((t: any) => t.name).sort();
-    expect(names).toEqual(["get_report", "list_recent_reports", "search_reports"]);
+    expect(names).toEqual([
+      "get_report",
+      "list_recent_reports",
+      "publish_report",
+      "search_reports",
+      "unpublish_report",
+      "upload_report",
+    ]);
     for (const tool of result.tools) {
       expect(tool.inputSchema.type).toBe("object");
     }
@@ -196,6 +204,255 @@ describe("list_recent_reports", () => {
     const data = parseToolJson(await callTool(app, "list_recent_reports", { limit: 1 }));
     expect(data.reports.length).toBe(1);
     expect(data.reports[0].id).toBe(auditId);
+  });
+});
+
+/** tools/call with extra headers (per-user / static key auth tests). */
+async function callToolWith(
+  target: Hono,
+  headers: Record<string, string>,
+  name: string,
+  args: Record<string, unknown>,
+) {
+  const res = await rpc(target, "tools/call", { name, arguments: args }, "/", headers);
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as JsonRpcResponse;
+  expect(body.error).toBeUndefined();
+  return body.result;
+}
+
+class FakeScanner implements SecurityScanner {
+  next: ScanResult = { verdict: "pass", findings: [] };
+
+  async scan(): Promise<ScanResult> {
+    return this.next;
+  }
+}
+
+describe("per-user API keys and write tools", () => {
+  const APP_BASE = "http://localhost:3000";
+  const STATIC_KEY = "static-mcp-key-0123456789abcdef";
+  let wctx: LocalContext;
+  let wapp: Hono; // static key + per-user keys enabled
+  let scanner: FakeScanner;
+  let aliceKey: string;
+  let bearer: Record<string, string>;
+
+  beforeAll(async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "hrb-mcp-write-test-"));
+    scanner = new FakeScanner();
+    wctx = createLocalContext({ dataDir, contentBaseUrl: CONTENT_BASE, scanner });
+    const alice = getDevUser("alice");
+    const issued = await wctx.apiKeys.issue({ sub: alice.sub, name: alice.name }, "mcp test");
+    aliceKey = issued.plaintext;
+    bearer = { authorization: `Bearer ${aliceKey}` };
+    wapp = createMcpApp(
+      {
+        reportService: wctx.service,
+        objectStorage: wctx.storage,
+        apiKeys: wctx.apiKeys,
+        appBaseUrl: APP_BASE,
+      },
+      { staticApiKey: STATIC_KEY },
+    );
+  });
+
+  test("invalid hrb_ key is 401 (does not fall back to anonymous)", async () => {
+    const res = await rpc(wapp, "tools/call", { name: "list_recent_reports", arguments: {} }, "/", {
+      authorization: "Bearer hrb_invalid-key",
+    });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as any;
+    expect(body.error.code).toBe("unauthorized");
+  });
+
+  test("keyless caller (dev) cannot use write tools", async () => {
+    // `app` from the top-level setup: no static key, no apiKeys store.
+    const result = await callTool(app, "upload_report", {
+      title: "t",
+      html: "<html><body>x</body></html>",
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("unauthorized");
+  });
+
+  test("static key caller stays anonymous read-only", async () => {
+    const headers = { authorization: `Bearer ${STATIC_KEY}` };
+    const listed = await callToolWith(wapp, headers, "list_recent_reports", {});
+    expect(listed.isError ?? false).toBe(false);
+    const denied = await callToolWith(wapp, headers, "upload_report", {
+      title: "t",
+      html: "<html><body>x</body></html>",
+    });
+    expect(denied.isError).toBe(true);
+    expect(denied.content[0].text).toContain("unauthorized");
+  });
+
+  test("upload → get (private, own) → publish → unpublish with a per-user key", async () => {
+    const uploaded = parseToolJson(
+      await callToolWith(wapp, bearer, "upload_report", {
+        title: "MCP 経由レポート",
+        description: "MCP からのアップロード",
+        html: page("MCP 経由レポート", "MCP アップロード本文です。"),
+      }),
+    );
+    expect(uploaded.status).toBe("private");
+    expect(uploaded.verdict).toBe("pass");
+    expect(uploaded.appUrl).toBe(`${APP_BASE}/reports/${uploaded.id}`);
+
+    // Owner can read their private report through the key…
+    const own = parseToolJson(await callToolWith(wapp, bearer, "get_report", { id: uploaded.id }));
+    expect(own.report.id).toBe(uploaded.id);
+    expect(own.report.status).toBe("private");
+    expect(own.url).toBeUndefined();
+
+    // …anonymous (static key) callers cannot.
+    const anon = await callToolWith(
+      wapp,
+      { authorization: `Bearer ${STATIC_KEY}` },
+      "get_report",
+      { id: uploaded.id },
+    );
+    expect(anon.isError).toBe(true);
+
+    const published = parseToolJson(
+      await callToolWith(wapp, bearer, "publish_report", { id: uploaded.id }),
+    );
+    expect(published.status).toBe("published");
+    expect(published.shareUrl).toBe(`${APP_BASE}/reports/${uploaded.id}`);
+    expect(published.contentUrl).toBe(`${CONTENT_BASE}/r/${uploaded.id}/`);
+
+    const unpublished = parseToolJson(
+      await callToolWith(wapp, bearer, "unpublish_report", { id: uploaded.id }),
+    );
+    expect(unpublished.status).toBe("private");
+  });
+
+  test("upload_report accepts tags: normalized, visible via get_report, searchable after publish", async () => {
+    const uploaded = parseToolJson(
+      await callToolWith(wapp, bearer, "upload_report", {
+        title: "タグ付き MCP レポート",
+        tags: [" ぶどう ", "ぶどう", "経理"],
+        html: page("タグ付き MCP レポート", "タグ検証の本文です。"),
+      }),
+    );
+    expect(uploaded.status).toBe("private");
+
+    // 正規化されたタグがメタに載る
+    const own = parseToolJson(await callToolWith(wapp, bearer, "get_report", { id: uploaded.id }));
+    expect(own.report.tags).toEqual(["ぶどう", "経理"]);
+
+    // 公開するとタグ語でも検索でヒットする（重み6）
+    await callToolWith(wapp, bearer, "publish_report", { id: uploaded.id });
+    const searched = parseToolJson(
+      await callToolWith(wapp, bearer, "search_reports", { query: "ぶどう" }),
+    );
+    expect(searched.results.map((r: any) => r.id)).toContain(uploaded.id);
+    expect(searched.results[0].tags).toEqual(["ぶどう", "経理"]);
+
+    // 上限超過はツールエラー
+    const tooMany = await callToolWith(wapp, bearer, "upload_report", {
+      title: "t",
+      tags: Array.from({ length: 11 }, (_, i) => `t${i}`),
+      html: page("t", "x"),
+    });
+    expect(tooMany.isError).toBe(true);
+  });
+
+  test("publish_report visibility=unlisted: link-only — get works anonymously, list/search stay empty", async () => {
+    const uploaded = parseToolJson(
+      await callToolWith(wapp, bearer, "upload_report", {
+        title: "リンク限定レポート",
+        html: page("リンク限定レポート", "限定共有の本文です。"),
+      }),
+    );
+
+    const published = parseToolJson(
+      await callToolWith(wapp, bearer, "publish_report", {
+        id: uploaded.id,
+        visibility: "unlisted",
+      }),
+    );
+    expect(published.status).toBe("unlisted");
+    expect(published.contentUrl).toBe(`${CONTENT_BASE}/r/${uploaded.id}/`);
+
+    // 匿名（static key）でも URL 付きで取得できる…
+    const anon = parseToolJson(
+      await callToolWith(wapp, { authorization: `Bearer ${STATIC_KEY}` }, "get_report", {
+        id: uploaded.id,
+      }),
+    );
+    expect(anon.report.status).toBe("unlisted");
+    expect(anon.url).toBe(`${CONTENT_BASE}/r/${uploaded.id}/`);
+
+    // …が、一覧・検索には載らない
+    const listed = parseToolJson(await callToolWith(wapp, bearer, "list_recent_reports", {}));
+    expect(listed.reports.map((r: any) => r.id)).not.toContain(uploaded.id);
+    const searched = parseToolJson(
+      await callToolWith(wapp, bearer, "search_reports", { query: "限定共有" }),
+    );
+    expect(searched.results.map((r: any) => r.id)).not.toContain(uploaded.id);
+
+    // visibility 省略の再呼び出しで published へ切替（後方互換）
+    const republished = parseToolJson(
+      await callToolWith(wapp, bearer, "publish_report", { id: uploaded.id }),
+    );
+    expect(republished.status).toBe("published");
+    const relisted = parseToolJson(await callToolWith(wapp, bearer, "list_recent_reports", {}));
+    expect(relisted.reports.map((r: any) => r.id)).toContain(uploaded.id);
+
+    // 後始末: 他テストの一覧に影響しないよう非公開へ戻す
+    await callToolWith(wapp, bearer, "unpublish_report", { id: uploaded.id });
+  });
+
+  test("cannot publish someone else's report (owner check)", async () => {
+    const bob = getDevUser("bob");
+    const { report, upload } = await wctx.service.create(bob, { title: "bob の下書き", kind: "html" });
+    await wctx.storage.putStagingObject(upload.key, new TextEncoder().encode(page("bob", "b")));
+    await wctx.service.complete(bob, report.id, upload.key);
+    const result = await callToolWith(wapp, bearer, "publish_report", { id: report.id });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("forbidden");
+  });
+
+  test("blocked upload is rejected (scan always runs)", async () => {
+    scanner.next = {
+      verdict: "block",
+      findings: [{ ruleId: "test-block", severity: "block", message: "test blocked" }],
+    };
+    try {
+      const rejected = parseToolJson(
+        await callToolWith(wapp, bearer, "upload_report", {
+          title: "悪性レポート",
+          html: "<html><body>evil</body></html>",
+        }),
+      );
+      expect(rejected.status).toBe("rejected");
+      expect(rejected.verdict).toBe("block");
+      expect(rejected.findings.map((f: any) => f.ruleId)).toContain("test-block");
+      expect(rejected.message).toContain("rejected");
+    } finally {
+      scanner.next = { verdict: "pass", findings: [] };
+    }
+  });
+
+  test("upload consumes the daily quota", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "hrb-mcp-quota-test-"));
+    const qctx = createLocalContext({ dataDir, contentBaseUrl: CONTENT_BASE, dailyUploadLimit: 1 });
+    const alice = getDevUser("alice");
+    const issued = await qctx.apiKeys.issue({ sub: alice.sub, name: alice.name }, "quota");
+    const qapp = createMcpApp({
+      reportService: qctx.service,
+      objectStorage: qctx.storage,
+      apiKeys: qctx.apiKeys,
+    });
+    const headers = { authorization: `Bearer ${issued.plaintext}` };
+    const args = { title: "quota", html: "<html><body>q</body></html>" };
+    const first = await callToolWith(qapp, headers, "upload_report", args);
+    expect(first.isError ?? false).toBe(false);
+    const second = await callToolWith(qapp, headers, "upload_report", args);
+    expect(second.isError).toBe(true);
+    expect(second.content[0].text).toContain("rate_limited");
   });
 });
 

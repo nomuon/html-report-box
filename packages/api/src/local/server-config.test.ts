@@ -22,6 +22,7 @@ describe("resolveServerConfig: dev", () => {
     expect(config.contentOrigin).toBe(config.appOrigin);
     expect(config.googleAuth).toBeNull();
     expect(config.mcpApiKey).toBeNull();
+    expect(config.dailyUploadLimit).toBeNull(); // 既定は無制限
     expect(config.allowDevUserHeader).toBe(true);
     expect(config.corsEnabled).toBe(true);
     expect(config.warnings).toEqual([]);
@@ -44,6 +45,28 @@ describe("resolveServerConfig: dev", () => {
   test("dev でも MCP_API_KEY 設定時はキーが有効になる", () => {
     const config = resolveServerConfig({ MCP_API_KEY: "dev-key" });
     expect(config.mcpApiKey).toBe("dev-key");
+  });
+});
+
+describe("resolveServerConfig: HRB_DAILY_UPLOAD_LIMIT", () => {
+  test("未設定・空は無制限（null）", () => {
+    expect(resolveServerConfig({}).dailyUploadLimit).toBeNull();
+    expect(resolveServerConfig({ HRB_DAILY_UPLOAD_LIMIT: "" }).dailyUploadLimit).toBeNull();
+  });
+
+  test("正の整数で上限を有効化（dev / vps 両方）", () => {
+    expect(resolveServerConfig({ HRB_DAILY_UPLOAD_LIMIT: "30" }).dailyUploadLimit).toBe(30);
+    expect(
+      resolveServerConfig({ ...VPS_ENV, HRB_DAILY_UPLOAD_LIMIT: "100" }).dailyUploadLimit,
+    ).toBe(100);
+  });
+
+  test("正の整数以外はエラー", () => {
+    for (const raw of ["0", "-1", "3.5", "abc", "Infinity"]) {
+      expect(() => resolveServerConfig({ HRB_DAILY_UPLOAD_LIMIT: raw })).toThrow(
+        /HRB_DAILY_UPLOAD_LIMIT/,
+      );
+    }
   });
 });
 

@@ -5,6 +5,7 @@
  *   sk = "META"          report metadata (+ GSI projections, see below)
  *   sk = "TOKENS"        list of tokens registered in the search index
  *   sk = "UPLOAD"        staging key of the latest issued presigned upload
+ *   sk = "VIEWS"         total view counter (閲覧数)
  *   sk = "FLAG#<ts>#<n>" abuse flags
  *   pk = "Q#<ownerSub>", sk = "D#<YYYY-MM-DD>"  daily upload quota counter
  *
@@ -23,10 +24,9 @@ import {
   ScanCommand,
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
-import { DAILY_UPLOAD_LIMIT } from "@hrb/shared";
 import type { ReportMeta, ReportStatus } from "@hrb/shared";
 import { DomainError } from "../errors.ts";
-import type { Page, PageOptions, ReportFlag, ReportRepository } from "../ports.ts";
+import type { Page, PageOptions, PublishedListOptions, ReportFlag, ReportRepository } from "../ports.ts";
 import { decodeKeyCursor, encodeKeyCursor } from "./cursor.ts";
 import { batchWriteAll, chunk, isConditionalCheckFailed } from "./dynamo-util.ts";
 import type { WriteRequest } from "./dynamo-util.ts";
@@ -37,6 +37,7 @@ import type { CommandClient } from "./types.ts";
 export const SK_META = "META";
 export const SK_TOKENS = "TOKENS";
 export const SK_UPLOAD = "UPLOAD";
+export const SK_VIEWS = "VIEWS";
 export const FLAG_SK_PREFIX = "FLAG#";
 /** Fixed GSI1 partition: only published META items carry it (sparse index). */
 export const GSI1_PUBLISHED_PK = "PUB";
@@ -95,8 +96,8 @@ export function itemToMeta(item: Record<string, unknown>): ReportMeta {
 export interface DynamoReportRepositoryOptions {
   client: CommandClient;
   tableName: string;
-  /** Enforced in the quota counter's condition expression. */
-  dailyUploadLimit?: number;
+  /** Enforced in the quota counter's condition expression. null / 省略 = 無制限（既定）。 */
+  dailyUploadLimit?: number | null;
   /** Flag sort-key uniqueness suffix (injectable for tests). */
   newSuffix?: () => string;
 }
@@ -104,13 +105,13 @@ export interface DynamoReportRepositoryOptions {
 export class DynamoReportRepository implements ReportRepository {
   private readonly client: CommandClient;
   private readonly tableName: string;
-  private readonly dailyUploadLimit: number;
+  private readonly dailyUploadLimit: number | null;
   private readonly newSuffix: () => string;
 
   constructor(options: DynamoReportRepositoryOptions) {
     this.client = options.client;
     this.tableName = options.tableName;
-    this.dailyUploadLimit = options.dailyUploadLimit ?? DAILY_UPLOAD_LIMIT;
+    this.dailyUploadLimit = options.dailyUploadLimit ?? null;
     this.newSuffix = options.newSuffix ?? (() => randomUUID());
   }
 
@@ -221,14 +222,38 @@ export class DynamoReportRepository implements ReportRepository {
 
   // ---- Lists ----
 
-  async listPublished(opts?: PageOptions): Promise<Page<ReportMeta>> {
+  /**
+   * GSI1 is keyed on updatedAt, so `order` maps directly to ScanIndexForward.
+   * `kind` / `tag` are not part of any index key — they are applied as a
+   * FilterExpression (tag via contains() on the tags list), and DynamoDB
+   * evaluates Limit BEFORE the filter, so a filtered page may come back short
+   * (even empty) while nextCursor still advances. Callers simply keep paging;
+   * the filter itself is exact.
+   * TODO: if tag filtering becomes hot, promote tags into a dedicated GSI.
+   */
+  async listPublished(opts?: PublishedListOptions): Promise<Page<ReportMeta>> {
+    const filters: string[] = [];
+    const names: Record<string, string> = {};
+    const values: Record<string, unknown> = { ":pub": GSI1_PUBLISHED_PK };
+    if (opts?.kind) {
+      filters.push("#kind = :kind");
+      names["#kind"] = "kind";
+      values[":kind"] = opts.kind;
+    }
+    if (opts?.tag) {
+      filters.push("contains(#tags, :tag)");
+      names["#tags"] = "tags";
+      values[":tag"] = opts.tag;
+    }
     const res = await this.client.send(
       new QueryCommand({
         TableName: this.tableName,
         IndexName: GSI1_NAME,
         KeyConditionExpression: "gsi1pk = :pub",
-        ExpressionAttributeValues: { ":pub": GSI1_PUBLISHED_PK },
-        ScanIndexForward: false, // updatedAt descending
+        ...(filters.length > 0 ? { FilterExpression: filters.join(" AND ") } : {}),
+        ...(filters.length > 0 ? { ExpressionAttributeNames: names } : {}),
+        ExpressionAttributeValues: values,
+        ScanIndexForward: opts?.order === "asc", // updatedAt descending by default
         Limit: opts?.limit ?? DEFAULT_PAGE_LIMIT,
         ...(opts?.cursor ? { ExclusiveStartKey: decodeKeyCursor(opts.cursor) } : {}),
       }),
@@ -352,35 +377,81 @@ export class DynamoReportRepository implements ReportRepository {
   // ---- Daily upload quota ----
 
   /**
-   * Atomic counter with a condition expression capping the count at the
-   * daily limit — a concurrent burst can never exceed it. When the condition
-   * fails the caller sees `limit + 1`, which ReportService maps to
-   * rate_limited.
+   * Atomic counter. With a limit configured, a condition expression caps the
+   * count at the daily limit — a concurrent burst can never exceed it. When
+   * the condition fails the caller sees `limit + 1`, which ReportService maps
+   * to rate_limited. With no limit (null) the increment is unconditional.
    */
   async incrementDailyUploads(ownerSub: string, dateKey: string): Promise<number> {
     const expiresAt = Math.floor(Date.parse(`${dateKey}T00:00:00Z`) / 1000) + QUOTA_TTL_SECONDS;
+    const limit = this.dailyUploadLimit;
     try {
       const res = await this.client.send(
         new UpdateCommand({
           TableName: this.tableName,
           Key: { pk: quotaPk(ownerSub), sk: quotaSk(dateKey) },
           UpdateExpression: "SET expiresAt = if_not_exists(expiresAt, :ttl) ADD #c :one",
-          ConditionExpression: "attribute_not_exists(#c) OR #c < :limit",
+          ...(limit !== null
+            ? {
+                ConditionExpression: "attribute_not_exists(#c) OR #c < :limit",
+                ExpressionAttributeValues: { ":one": 1, ":ttl": expiresAt, ":limit": limit },
+              }
+            : { ExpressionAttributeValues: { ":one": 1, ":ttl": expiresAt } }),
           ExpressionAttributeNames: { "#c": "cnt" },
-          ExpressionAttributeValues: {
-            ":one": 1,
-            ":ttl": expiresAt,
-            ":limit": this.dailyUploadLimit,
-          },
           ReturnValues: "ALL_NEW",
         }),
       );
       const cnt = (res?.Attributes as { cnt?: unknown } | undefined)?.cnt;
-      return typeof cnt === "number" ? cnt : this.dailyUploadLimit + 1;
+      if (typeof cnt === "number") return cnt;
+      // ReturnValues=ALL_NEW で cnt が欠けるのは異常系。上限があれば超過扱いに倒す。
+      return limit !== null ? limit + 1 : 0;
     } catch (err) {
-      if (isConditionalCheckFailed(err)) return this.dailyUploadLimit + 1;
+      if (limit !== null && isConditionalCheckFailed(err)) return limit + 1;
       throw err;
     }
+  }
+
+  async getDailyUploads(ownerSub: string, dateKey: string): Promise<number> {
+    const res = await this.client.send(
+      new GetCommand({
+        TableName: this.tableName,
+        Key: { pk: quotaPk(ownerSub), sk: quotaSk(dateKey) },
+      }),
+    );
+    const cnt = (res?.Item as { cnt?: unknown } | undefined)?.cnt;
+    return typeof cnt === "number" ? cnt : 0;
+  }
+
+  // ---- View counter ----
+
+  /**
+   * Atomic, uncapped counter on the VIEWS item of the report partition
+   * (swept together with everything else by delete()).
+   */
+  async incrementViewCount(id: string): Promise<number> {
+    const res = await this.client.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: { pk: reportPk(id), sk: SK_VIEWS },
+        UpdateExpression: "ADD #c :one",
+        ExpressionAttributeNames: { "#c": "cnt" },
+        ExpressionAttributeValues: { ":one": 1 },
+        ReturnValues: "ALL_NEW",
+      }),
+    );
+    const cnt = (res?.Attributes as { cnt?: unknown } | undefined)?.cnt;
+    return typeof cnt === "number" ? cnt : 0;
+  }
+
+  async getViewCount(id: string): Promise<number> {
+    const res = await this.client.send(
+      new GetCommand({
+        TableName: this.tableName,
+        Key: { pk: reportPk(id), sk: SK_VIEWS },
+      }),
+    );
+    const cnt = (res?.Item as { cnt?: unknown } | undefined)?.cnt;
+    return typeof cnt === "number" ? cnt : 0;
   }
 
   // ---- Abuse flags ----

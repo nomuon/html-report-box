@@ -14,6 +14,7 @@ import {
   MAX_TOKENS_PER_DOCUMENT,
   TOKEN_WEIGHT_BODY,
   TOKEN_WEIGHT_DESCRIPTION,
+  TOKEN_WEIGHT_TAG,
   TOKEN_WEIGHT_TITLE,
 } from "./constants.ts";
 
@@ -107,13 +108,15 @@ export function truncateUtf8Bytes(text: string, maxBytes: number): string {
 export interface DocumentFields {
   title: string;
   description?: string;
+  /** Normalized tags (see ReportTagsSchema). Indexed between title and description. */
+  tags?: readonly string[];
   /** Extracted body text. Truncated to MAX_INDEX_BODY_BYTES (50KB) before tokenizing. */
   body?: string;
 }
 
 export interface WeightedToken {
   token: string;
-  /** Sum of field weights the token appears in (title=8, description=4, body=1). */
+  /** Sum of field weights the token appears in (title=8, tags=6, description=4, body=1). */
   weight: number;
 }
 
@@ -132,6 +135,8 @@ export function buildDocumentTokens(fields: DocumentFields): WeightedToken[] {
     }
   };
   add(fields.title, TOKEN_WEIGHT_TITLE);
+  // タグ間は空白区切りで結合（空白は separator なのでタグ跨ぎのバイグラムは生まれない）。
+  add((fields.tags ?? []).join(" "), TOKEN_WEIGHT_TAG);
   add(fields.description ?? "", TOKEN_WEIGHT_DESCRIPTION);
   add(truncateUtf8Bytes(fields.body ?? "", MAX_INDEX_BODY_BYTES), TOKEN_WEIGHT_BODY);
 

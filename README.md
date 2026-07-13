@@ -58,6 +58,13 @@ POST /api/reports（META 作成 status=private + presigned 発行）
 - `GET /api/reports/:id/source`（オーナー/admin）… 非公開プレビューと HTML 直接編集用のソース取得
 - `PUT /api/reports/:id/content`（オーナー/admin、html のみ）… HTML 直接編集。上書きアップロード同様フルスキャンを再実行
 - コンテンツオリジン（`/r/<id>/`）に載るのは published のみ。「content バケットに存在する = 公開中」の不変条件は維持
+- **有効期限つき公開（遅延失効）** … publish 時に `expiresAt`（ISO 8601、省略時は無期限）を指定でき、
+  `PATCH /api/reports/:id` でも変更/クリア（null）できる。期限を過ぎたレポートは一覧・検索・
+  `GET /api/reports/:id`（非オーナー）から即座に消える（status は書き換えず可視性判定のみ。
+  オーナー/admin はメタを閲覧でき、再 publish で期限の再設定/クリア = 再公開ができる）。
+  既知の制約: バッチ処理を持たない遅延失効のため、検索インデックスの postings と
+  コンテンツ配信オリジン（`/r/<id>/`）上の公開コピーは失効後も即時には消えない
+  （URL 直撃では閲覧できてしまう）。完全な即時失効は将来のバッチ/イベント処理で対応する。
 
 ## パッケージ構成（Bun workspaces モノレポ）
 
@@ -67,7 +74,7 @@ POST /api/reports（META 作成 status=private + presigned 発行）
 | `packages/core` (@hrb/core) | ドメインサービス（ReportService）+ ports（Repository/SearchIndex/ObjectStorage/AuthVerifier/…）+ ローカルアダプタ |
 | `packages/scanner` (@hrb/scanner) | 静的セキュリティスキャナ。parse5 で 1 回パース → 1 ルール 1 ファイルのプラガブル Rule 群 + yauzl zip 検査 |
 | `packages/api` (@hrb/api) | Hono HTTP 層（`/api/*`）。`lambda.ts` / `local/server.ts`（Bun dev サーバー） |
-| `packages/mcp` (@hrb/mcp) | リモート MCP サーバー（Streamable HTTP・ステートレス）。search / get / list の 3 ツール |
+| `packages/mcp` (@hrb/mcp) | リモート MCP サーバー（Streamable HTTP・ステートレス）。読み取り 3 ツール + per-user API キー認証の書き込み 3 ツール（upload / publish / unpublish） |
 | `packages/web` (@hrb/web) | React SPA（Bun HTML imports、Vite 不使用）。一覧・検索・D&D アップロード・詳細シェル・admin |
 | `packages/infra` (@hrb/infra) | CDK 4 スタック: `HrbEdgeStack`(WAF, us-east-1) / `HrbStatefulStack`(DynamoDB・S3・Cognito) / `HrbAppStack`(Lambda・API GW) / `HrbCdnStack`(CloudFront×2 + OAC) |
 
@@ -134,13 +141,24 @@ dev サーバー起動中に:
 claude mcp add --transport http hrb http://localhost:3000/mcp
 ```
 
-ツール（すべて読み取り専用・published のみ参照可能）:
+認証は `Authorization: Bearer <キー>` で 2 種類:
+
+- **per-user API キー**（`hrb_` プレフィクス）… マイレポート（`/mine`）の「API キー」セクションで発行（平文は発行直後のみ表示、保存されるのは sha256 ハッシュのみ）。そのユーザーとして動作し、書き込みツールと自分の非公開レポートの参照が可能
+- **静的キー**（`MCP_API_KEY`。vps では必須、dev では任意）… 匿名・読み取り専用（published のみ参照可能）。dev のキーレス接続も同じ扱い
+
+読み取りツール:
 
 - `search_reports { query, limit? }` … 全文検索（日本語/英語）。メタ + 共有 URL + スコア
-- `get_report { id }` … メタ + 共有 URL + 抽出済みプレーンテキスト（`.extracted.txt` を再利用、再パースなし）
+- `get_report { id }` … メタ + 共有 URL + 抽出済みプレーンテキスト（`.extracted.txt` を再利用、再パースなし）。per-user キーなら自分の非公開レポートも取得可
 - `list_recent_reports { limit? }` … 更新順一覧
 
-本番では Distribution A 経由の `https://app.<domain>/mcp`（WAF IP 制限が自動適用）+ 静的 API キー（`Authorization: Bearer`、SSM SecureString）を予定。
+書き込みツール（per-user キー必須。未認証はツール応答でエラー）:
+
+- `upload_report { title, description?, html }` … HTML 1 枚を直接アップロード（presigned 不要の内部フロー）。セキュリティスキャンは必ず実行され、pass/warn → private、block → rejected。日次アップロード上限（`HRB_DAILY_UPLOAD_LIMIT` 設定時のみ。既定は無制限）も通常どおり消費
+- `publish_report { id }` … 自分の private レポートを公開し shareUrl（`/reports/:id`）を返す
+- `unpublish_report { id }` … 公開を取り下げて private に戻す
+
+本番では Distribution A 経由の `https://app.<domain>/mcp`（WAF IP 制限が自動適用）。静的キーは SSM SecureString の `MCP_API_KEY` を予定。
 
 ## セキュリティ設計（要約）
 

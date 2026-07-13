@@ -23,7 +23,7 @@ const USERS = ["alice", "bob", "admin"];
 describe("DevAuthProvider", () => {
   test("defaults to the first dev user and sends x-dev-user", () => {
     const auth = new DevAuthProvider(USERS, memStorage());
-    expect(auth.getSession()).toEqual({ name: "alice", isAdmin: false });
+    expect(auth.getSession()).toEqual({ username: "alice", name: "alice", isAdmin: false });
     expect(auth.getHeaders()).toEqual({ [DEV_USER_HEADER]: "alice" });
   });
 
@@ -37,7 +37,7 @@ describe("DevAuthProvider", () => {
   test("admin user gets isAdmin=true", () => {
     const auth = new DevAuthProvider(USERS, memStorage());
     auth.setUser("admin");
-    expect(auth.getSession()).toEqual({ name: "admin", isAdmin: true });
+    expect(auth.getSession()).toEqual({ username: "admin", name: "admin", isAdmin: true });
   });
 
   test("setUser persists, rejects unknown users, notifies subscribers", () => {
@@ -108,6 +108,8 @@ describe("GoogleAuthProvider", () => {
 
     expect(calls[0]?.url).toBe("/api/auth/google");
     expect(auth.getSession()).toEqual({
+      // username は AdminUser.username（google モードは email）に一致する
+      username: "carol@example.com",
       name: "Carol",
       isAdmin: false,
       email: "carol@example.com",

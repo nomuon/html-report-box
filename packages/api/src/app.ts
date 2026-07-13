@@ -15,9 +15,10 @@ import type { ZodType } from "zod";
 import {
   AdminListReportsQuerySchema,
   CompleteReportRequestSchema,
+  CreateApiKeyRequestSchema,
   CreateReportRequestSchema,
   CreateUploadUrlRequestSchema,
-  DAILY_UPLOAD_LIMIT,
+  MAX_API_KEYS_PER_USER,
   FlagReportRequestSchema,
   GoogleLoginRequestSchema,
   ListReportsQuerySchema,
@@ -26,6 +27,8 @@ import {
   MAX_ZIP_SIZE_BYTES,
   MAX_ZIP_UNCOMPRESSED_BYTES,
   PaginationQuerySchema,
+  PublishReportRequestSchema,
+  RollbackReportRequestSchema,
   SearchQuerySchema,
   UpdateReportContentRequestSchema,
   UpdateReportRequestSchema,
@@ -33,9 +36,9 @@ import {
   toOwnedReport,
   toPublicReport,
 } from "@hrb/shared";
-import type { GetConfigResponse } from "@hrb/shared";
+import type { GetConfigResponse, PublishVisibility } from "@hrb/shared";
 import { DomainError, isDomainError } from "@hrb/core";
-import type { AuthUser, AuthVerifier, PageOptions, ReportService, SessionAuth, UserAdmin } from "@hrb/core";
+import type { ApiKeyStore, AuthUser, AuthVerifier, PageOptions, ReportService, SessionAuth, UserAdmin } from "@hrb/core";
 import { createMemoryRateLimiter } from "./rate-limit.ts";
 import type { RateLimiter } from "./rate-limit.ts";
 
@@ -48,11 +51,13 @@ export interface AppContext {
   auth: AuthVerifier;
   /** Login/logout endpoints (google mode). Absent → routes are not mounted. */
   sessionAuth?: SessionAuth;
+  /** Per-user API keys (/me/api-keys). Absent → routes are not mounted. */
+  apiKeys?: ApiKeyStore;
   userAdmin: UserAdmin;
   /** Origin serving uploaded content, e.g. http://localhost:3000 (GET /config). */
   contentBaseUrl: string;
-  /** Advertised in GET /config; must match what the ReportService enforces. */
-  dailyUploadLimit?: number;
+  /** Advertised in GET /config; must match what the ReportService enforces. null / 省略 = 無制限。 */
+  dailyUploadLimit?: number | null;
   /** Rate limiter for POST /reports/:id/flag (defaults to in-memory per-IP). */
   flagLimiter?: RateLimiter;
   /**
@@ -184,7 +189,7 @@ export function createApp(ctx: AppContext): AppType {
         maxZipSizeBytes: MAX_ZIP_SIZE_BYTES,
         maxZipUncompressedBytes: MAX_ZIP_UNCOMPRESSED_BYTES,
         maxZipEntries: MAX_ZIP_ENTRIES,
-        dailyUploadLimit: ctx.dailyUploadLimit ?? DAILY_UPLOAD_LIMIT,
+        dailyUploadLimit: ctx.dailyUploadLimit ?? null,
       },
     };
     return c.json(config);
@@ -209,7 +214,12 @@ export function createApp(ctx: AppContext): AppType {
 
   app.get("/reports", async (c) => {
     const query = parseWith(ListReportsQuerySchema, c.req.query(), "query");
-    const page = await ctx.service.listPublished(pageOptions(query));
+    const page = await ctx.service.listPublished({
+      ...pageOptions(query),
+      ...(query.order !== undefined ? { order: query.order } : {}),
+      ...(query.kind !== undefined ? { kind: query.kind } : {}),
+      ...(query.tag !== undefined ? { tag: query.tag } : {}),
+    });
     return c.json({
       reports: page.items.map(toPublicReport),
       ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}),
@@ -218,15 +228,32 @@ export function createApp(ctx: AppContext): AppType {
 
   app.get("/search", async (c) => {
     const query = parseWith(SearchQuerySchema, c.req.query(), "query");
-    const results = await ctx.service.search(query.q, query.limit ?? 20);
-    return c.json({ results });
+    const { results, nextCursor } = await ctx.service.search(query.q, {
+      limit: query.limit ?? 20,
+      ...(query.cursor !== undefined ? { cursor: query.cursor } : {}),
+    });
+    return c.json({
+      results,
+      ...(nextCursor !== undefined ? { nextCursor } : {}),
+    });
   });
 
   app.get("/reports/:id", async (c) => {
-    const { report, url } = await ctx.service.get(c.req.param("id"), c.get("user"));
+    const { report, url, isOwner, viewCount } = await ctx.service.get(
+      c.req.param("id"),
+      c.get("user"),
+    );
+    // Scan outcome is owner/admin-only context (PublicReport omits it by design).
+    const canSeeScan = isOwner || (c.get("user")?.isAdmin ?? false);
     return c.json({
       report: toPublicReport(report),
+      isOwner,
       ...(url !== undefined ? { url } : {}),
+      ...(canSeeScan && report.verdict !== undefined
+        ? { verdict: report.verdict, findings: report.findings }
+        : {}),
+      // viewCount は service が owner/admin の文脈でのみ返す。
+      ...(viewCount !== undefined ? { viewCount } : {}),
     });
   });
 
@@ -256,6 +283,39 @@ export function createApp(ctx: AppContext): AppType {
     });
   });
 
+  app.get("/me/quota", requireAuth, async (c) => {
+    return c.json(await ctx.service.getUploadQuota(mustUser(c)));
+  });
+
+  // Per-user API keys (MCP 等のプログラマティックアクセス用)。平文は発行
+  // レスポンスで一度だけ返す（保存されるのはハッシュのみ）。
+  const apiKeys = ctx.apiKeys;
+  if (apiKeys) {
+    app.get("/me/api-keys", requireAuth, async (c) => {
+      const keys = await apiKeys.list(mustUser(c).sub);
+      return c.json({ keys });
+    });
+
+    app.post("/me/api-keys", requireAuth, async (c) => {
+      const body = parseWith(CreateApiKeyRequestSchema, await readJson(c), "api key");
+      const user = mustUser(c);
+      const existing = await apiKeys.list(user.sub);
+      if (existing.length >= MAX_API_KEYS_PER_USER) {
+        throw new DomainError(
+          "conflict",
+          `api key limit (${MAX_API_KEYS_PER_USER}) reached; revoke an unused key first`,
+        );
+      }
+      const { key, plaintext } = await apiKeys.issue({ sub: user.sub, name: user.name }, body.name);
+      return c.json({ key, plaintext }, 201);
+    });
+
+    app.delete("/me/api-keys/:keyId", requireAuth, async (c) => {
+      await apiKeys.revoke(mustUser(c).sub, c.req.param("keyId"));
+      return c.json({ ok: true as const });
+    });
+  }
+
   app.post("/reports", requireAuth, async (c) => {
     const body = parseWith(CreateReportRequestSchema, await readJson(c), "report");
     const { report, upload } = await ctx.service.create(
@@ -282,7 +342,25 @@ export function createApp(ctx: AppContext): AppType {
   });
 
   app.post("/reports/:id/publish", requireAuth, async (c) => {
-    const { report, url } = await ctx.service.publish(mustUser(c), c.req.param("id"));
+    // body は省略可（後方互換）: 省略時は visibility=published / 無期限
+    const raw = await c.req.text();
+    let visibility: PublishVisibility = "published";
+    let expiresAt: string | undefined;
+    if (raw.trim().length > 0) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new DomainError("bad_request", "request body must be valid JSON");
+      }
+      const body = parseWith(PublishReportRequestSchema, parsed, "publish");
+      visibility = body.visibility;
+      expiresAt = body.expiresAt;
+    }
+    const { report, url } = await ctx.service.publish(mustUser(c), c.req.param("id"), {
+      visibility,
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
+    });
     return c.json({ report: toOwnedReport(report), url });
   });
 
@@ -294,6 +372,33 @@ export function createApp(ctx: AppContext): AppType {
   app.get("/reports/:id/source", requireAuth, async (c) => {
     const source = await ctx.service.getSource(mustUser(c), c.req.param("id"));
     return c.json(source);
+  });
+
+  app.get("/reports/:id/versions", requireAuth, async (c) => {
+    const versions = await ctx.service.listVersions(mustUser(c), c.req.param("id"));
+    return c.json({ versions });
+  });
+
+  app.get("/reports/:id/versions/:version/source", requireAuth, async (c) => {
+    const raw = c.req.param("version");
+    if (!/^\d+$/.test(raw)) {
+      throw new DomainError("validation_failed", "version must be a positive integer");
+    }
+    const source = await ctx.service.getVersionSource(
+      mustUser(c),
+      c.req.param("id"),
+      Number.parseInt(raw, 10),
+    );
+    return c.json(source);
+  });
+
+  app.post("/reports/:id/rollback", requireAuth, async (c) => {
+    const body = parseWith(RollbackReportRequestSchema, await readJson(c), "rollback");
+    const { report, url } = await ctx.service.rollback(mustUser(c), c.req.param("id"), body.version);
+    return c.json({
+      report: toOwnedReport(report),
+      ...(url !== undefined ? { url } : {}),
+    });
   });
 
   app.put("/reports/:id/content", requireAuth, async (c) => {
@@ -335,8 +440,12 @@ export function createApp(ctx: AppContext): AppType {
   });
 
   app.get("/admin/flagged", async (c) => {
-    const items = await ctx.service.adminListFlagged(mustUser(c));
-    return c.json({ items });
+    const query = parseWith(PaginationQuerySchema, c.req.query(), "query");
+    const page = await ctx.service.adminListFlagged(mustUser(c), pageOptions(query));
+    return c.json({
+      items: page.items,
+      ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}),
+    });
   });
 
   app.get("/admin/reports/:id/flags", async (c) => {
@@ -387,6 +496,13 @@ export function createApp(ctx: AppContext): AppType {
     if (sub === null) throw new DomainError("not_found", "user not found");
     if (sub === me.sub) throw new DomainError("bad_request", "cannot delete your own account");
     const deletedReports = await ctx.service.adminDeleteByOwner(me, sub);
+    // Revoke every API key the user issued — otherwise verify() would keep
+    // resolving them to the deleted sub and MCP write tools would still work.
+    if (apiKeys) {
+      for (const key of await apiKeys.list(sub)) {
+        await apiKeys.revoke(sub, key.keyId);
+      }
+    }
     await ctx.userAdmin.deleteUser(username);
     return c.json({ ok: true as const, deletedReports });
   });

@@ -16,6 +16,8 @@ export const DEV_USER_STORAGE_KEY = "hrb-dev-user";
 export const GOOGLE_SESSION_STORAGE_KEY = "hrb-google-session";
 
 export interface AuthSession {
+  /** Account id matching AdminUser.username (dev: dev user id, google: email). */
+  username: string;
   /** Display name / dev user id. */
   name: string;
   isAdmin: boolean;
@@ -94,7 +96,7 @@ export class DevAuthProvider extends BaseAuthProvider {
 
   private buildSession(): AuthSession | null {
     if (!this.current) return null;
-    return { name: this.current, isAdmin: this.current === "admin" };
+    return { username: this.current, name: this.current, isAdmin: this.current === "admin" };
   }
 
   getSession(): AuthSession | null {
@@ -233,6 +235,8 @@ export class GoogleAuthProvider extends BaseAuthProvider {
     if (!this.stored) return null;
     const { user } = this.stored;
     return {
+      // google モードの UserAdmin は username = email（core/local/google-auth.ts）。
+      username: user.email,
       name: user.name,
       isAdmin: user.isAdmin,
       email: user.email,

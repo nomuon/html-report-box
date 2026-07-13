@@ -28,6 +28,7 @@ export type DropzoneEvent =
   | { type: "FILE_ACCEPTED"; file: SelectedFile }
   | { type: "CANCEL_SELECT" }
   | { type: "UPLOAD_START" }
+  | { type: "CANCEL_UPLOAD" }
   | { type: "PROGRESS"; percent: number }
   | { type: "UPLOADED" }
   | { type: "COMPLETE"; report: OwnedReport; url?: string }
@@ -56,6 +57,9 @@ export function dropzoneReducer(state: DropzoneState, ev: DropzoneEvent): Dropzo
       return state.phase === "selected"
         ? { phase: "uploading", file: state.file, percent: 0 }
         : state;
+    case "CANCEL_UPLOAD":
+      // ユーザーによる中断はファイル選択済みに戻す（scanning 以降はキャンセル不可）。
+      return state.phase === "uploading" ? { phase: "selected", file: state.file } : state;
     case "PROGRESS":
       return state.phase === "uploading"
         ? { ...state, percent: Math.max(0, Math.min(100, ev.percent)) }

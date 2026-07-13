@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { PresignedUpload } from "@hrb/shared";
-import { uploadToPresigned } from "./upload.ts";
+import { UploadAbortedError, uploadToPresigned } from "./upload.ts";
 
 /** Minimal XMLHttpRequest stand-in: records the request and lets the test drive events. */
 class FakeXHR {
@@ -24,6 +24,9 @@ class FakeXHR {
   send(body: unknown) {
     this.body = body;
     FakeXHR.last = this;
+  }
+  abort() {
+    this.onabort?.();
   }
 }
 
@@ -116,5 +119,31 @@ describe("uploadToPresigned (PUT transport)", () => {
     xhr.status = 403;
     xhr.onload?.();
     await expect(promise).rejects.toThrow("HTTP 403");
+  });
+});
+
+describe("uploadToPresigned (abort)", () => {
+  const upload: PresignedUpload = {
+    ...basePresigned,
+    method: "post",
+    url: "/local-upload",
+    fields: {},
+    headers: {},
+  };
+
+  test("signal の abort で XHR を中断し UploadAbortedError で reject する", async () => {
+    const controller = new AbortController();
+    const promise = uploadToPresigned(upload, new Blob(["x"]), undefined, controller.signal);
+    expect(FakeXHR.last).not.toBeNull();
+    controller.abort();
+    await expect(promise).rejects.toBeInstanceOf(UploadAbortedError);
+  });
+
+  test("abort 済みの signal では送信せずに即 reject する", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const promise = uploadToPresigned(upload, new Blob(["x"]), undefined, controller.signal);
+    await expect(promise).rejects.toBeInstanceOf(UploadAbortedError);
+    expect(FakeXHR.last).toBeNull();
   });
 });

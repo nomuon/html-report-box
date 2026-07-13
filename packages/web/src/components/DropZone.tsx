@@ -18,12 +18,14 @@ export interface DropZoneProps {
   onCancelUpload?: () => void;
   /** done / rejected / warn 表示は画面ごとに異なるため親が差し込む。 */
   resultContent?: ReactNode;
+  /** 指定すると入力を受け付けず idle 表示を差し替える（日次上限到達など）。 */
+  disabledContent?: ReactNode;
   small?: boolean;
 }
 
 const SCAN_SLOW_MS = 3000;
 
-export function DropZone({ state, dispatch, onFiles, onCancelUpload, resultContent, small }: DropZoneProps) {
+export function DropZone({ state, dispatch, onFiles, onCancelUpload, resultContent, disabledContent, small }: DropZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   // dragleave の児要素チラつき対策: カウンタ方式
   const dragDepth = useRef(0);
@@ -50,12 +52,15 @@ export function DropZone({ state, dispatch, onFiles, onCancelUpload, resultConte
   }, []);
 
   const openPicker = () => inputRef.current?.click();
+  const disabled = disabledContent != null;
   const interactive =
-    state.phase === "idle" || state.phase === "dragover" || state.phase === "selected";
+    !disabled &&
+    (state.phase === "idle" || state.phase === "dragover" || state.phase === "selected");
 
   const classes = [
     "hrb-dropzone",
     `hrb-dropzone--${state.phase}`,
+    disabled ? "hrb-dropzone--disabled" : "",
     small ? "hrb-dropzone--small" : "",
   ]
     .filter(Boolean)
@@ -105,18 +110,21 @@ export function DropZone({ state, dispatch, onFiles, onCancelUpload, resultConte
         }}
       />
 
-      {state.phase === "idle" && (
-        <div className="hrb-dropzone__inner">
-          <div className="hrb-dropzone__icon" aria-hidden="true">
-            <Icon name="upload-cloud" size={28} />
+      {state.phase === "idle" &&
+        (disabled ? (
+          <div className="hrb-dropzone__inner">{disabledContent}</div>
+        ) : (
+          <div className="hrb-dropzone__inner">
+            <div className="hrb-dropzone__icon" aria-hidden="true">
+              <Icon name="upload-cloud" size={28} />
+            </div>
+            <p className="hrb-dropzone__lead">ここに HTML / ZIP ファイルをドラッグ＆ドロップ</p>
+            <p className="hrb-dropzone__or">または</p>
+            <Button variant="secondary" size="lg" onClick={openPicker}>
+              ファイルを選択
+            </Button>
           </div>
-          <p className="hrb-dropzone__lead">ここに HTML / ZIP ファイルをドラッグ＆ドロップ</p>
-          <p className="hrb-dropzone__or">または</p>
-          <Button variant="secondary" size="lg" onClick={openPicker}>
-            ファイルを選択
-          </Button>
-        </div>
-      )}
+        ))}
 
       {state.phase === "dragover" && (
         <div className="hrb-dropzone__inner">

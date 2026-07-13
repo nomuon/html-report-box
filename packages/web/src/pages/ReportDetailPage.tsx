@@ -4,26 +4,28 @@
  * ソースを srcdoc で埋め込む（非公開プレビュー）。
  */
 import { useState } from "react";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
+import { scanFindingSummary } from "@hrb/shared";
 import { useApp, useSession } from "../app-context.tsx";
 import { Button } from "../components/Button.tsx";
-import { StatusChip } from "../components/Chip.tsx";
+import { ExpiryChip, StatusChip, TagList } from "../components/Chip.tsx";
 import { useCopyUrl } from "../components/CopyUrlRow.tsx";
 import { EmptyState } from "../components/EmptyState.tsx";
 import { Icon } from "../components/Icon.tsx";
 import { Modal } from "../components/Modal.tsx";
 import { PublishToggle } from "../components/PublishToggle.tsx";
+import { DetailHeaderSkeleton } from "../components/Skeleton.tsx";
 import { useToast } from "../components/Toast.tsx";
 import {
   EditHtmlModal,
   EditReportModal,
   OverwriteReportModal,
 } from "../components/report-modals.tsx";
+import { VersionHistoryModal } from "../components/VersionHistoryModal.tsx";
 import { isApiError } from "../lib/api.ts";
 import { formatDateTime } from "../lib/format.ts";
-
-const IFRAME_SANDBOX = "allow-scripts allow-forms allow-popups allow-modals";
+import { IFRAME_SANDBOX } from "../lib/sandbox.ts";
 
 function FlagModal({ id, open, onClose }: { id: string; open: boolean; onClose: () => void }) {
   const { api } = useApp();
@@ -75,12 +77,13 @@ function FlagModal({ id, open, onClose }: { id: string; open: boolean; onClose: 
   );
 }
 
-type ModalState = "flag" | "edit-html" | "edit-meta" | "overwrite" | null;
+type ModalState = "flag" | "edit-html" | "edit-meta" | "overwrite" | "versions" | null;
 
 export function ReportDetailPage() {
   const { id = "" } = useParams();
   const { api } = useApp();
   const session = useSession();
+  const navigate = useNavigate();
   const copyUrl = useCopyUrl();
   const [modal, setModal] = useState<ModalState>(null);
 
@@ -91,13 +94,8 @@ export function ReportDetailPage() {
     retry: (count, err) => !(isApiError(err) && err.status === 404) && count < 2,
   });
 
-  // オーナー判定: 自分のレポート一覧に含まれるか（PublicReport は ownerSub を持たない）
-  const mine = useQuery({
-    queryKey: ["my-reports", "first-page"],
-    queryFn: () => api.myReports({ limit: 100 }),
-    enabled: session !== null,
-  });
-  const isOwner = mine.data?.reports.some((r) => r.id === id) ?? false;
+  // オーナー判定: API が viewer 文脈で返す isOwner を使う
+  const isOwner = query.data?.isOwner ?? false;
   const canEdit = isOwner || (session?.isAdmin ?? false);
 
   const report = query.data?.report;
@@ -114,8 +112,8 @@ export function ReportDetailPage() {
 
   if (query.isLoading) {
     return (
-      <div className="hrb-page">
-        <p className="hrb-loading">読み込み中…</p>
+      <div className="hrb-detail">
+        <DetailHeaderSkeleton />
       </div>
     );
   }
@@ -129,7 +127,8 @@ export function ReportDetailPage() {
   }
 
   const shareUrl = `${location.origin}/reports/${report.id}`;
-  const published = report.status === "published";
+  // published / unlisted — URL を知っていれば誰でも閲覧できる状態
+  const published = report.status === "published" || report.status === "unlisted";
 
   const emptyDetail =
     report.status === "rejected"
@@ -149,21 +148,43 @@ export function ReportDetailPage() {
             <span>{report.ownerName}</span>
             <span aria-hidden="true">·</span>
             <span>更新 {formatDateTime(report.updatedAt)}</span>
+            {/* viewCount は API がオーナー/管理者の文脈でのみ返す */}
+            {query.data?.viewCount !== undefined && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>閲覧数 {query.data.viewCount}</span>
+              </>
+            )}
             {!canEdit && (
               <>
                 <span aria-hidden="true">·</span>
                 <StatusChip status={report.status} />
               </>
             )}
+            {/* 公開期限バッジ（期限切れはオーナー/管理者にのみ見える — 他者には 404） */}
+            <ExpiryChip status={report.status} expiresAt={report.expiresAt} />
+            <TagList
+              tags={report.tags}
+              onTagClick={(t) => navigate(`/?tag=${encodeURIComponent(t)}`)}
+            />
           </div>
         </div>
         <div className="hrb-detail__actions">
           {canEdit && (
             <>
-              {report.status === "published" || report.status === "private" ? (
+              {report.status === "published" || report.status === "unlisted" || report.status === "private" ? (
                 <PublishToggle report={report} />
               ) : (
                 <StatusChip status={report.status} />
+              )}
+              {query.data?.verdict === "warn" && (query.data.findings?.length ?? 0) > 0 && (
+                <span
+                  className="hrb-tip"
+                  data-tip={`スキャン注意項目: ${(query.data.findings ?? []).map(scanFindingSummary).join(" / ")}`}
+                  tabIndex={0}
+                >
+                  <Icon name="info" size={15} />
+                </span>
               )}
               {report.kind === "html" && (
                 <Button variant="secondary" onClick={() => setModal("edit-html")}>
@@ -177,7 +198,11 @@ export function ReportDetailPage() {
               </Button>
               <Button variant="secondary" onClick={() => setModal("edit-meta")}>
                 <Icon name="pencil" size={16} />
-                タイトル・説明
+                タイトル・説明・タグ
+              </Button>
+              <Button variant="secondary" onClick={() => setModal("versions")}>
+                <Icon name="clock" size={16} />
+                バージョン履歴
               </Button>
             </>
           )}
@@ -242,7 +267,12 @@ export function ReportDetailPage() {
           />
           <EditReportModal
             key={`meta-${report.id}-${modal === "edit-meta"}`}
-            report={{ id: report.id, title: report.title, description: report.description }}
+            report={{
+              id: report.id,
+              title: report.title,
+              description: report.description,
+              tags: report.tags,
+            }}
             open={modal === "edit-meta"}
             onClose={() => setModal(null)}
           />
@@ -250,6 +280,12 @@ export function ReportDetailPage() {
             key={`ow-${report.id}-${modal === "overwrite"}`}
             report={report}
             open={modal === "overwrite"}
+            onClose={() => setModal(null)}
+          />
+          <VersionHistoryModal
+            key={`ver-${report.id}-${modal === "versions"}`}
+            report={report}
+            open={modal === "versions"}
             onClose={() => setModal(null)}
           />
         </>

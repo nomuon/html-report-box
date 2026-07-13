@@ -54,7 +54,7 @@ afterEach(() => {
 /** create → staged PUT → complete（新モデルでは private で終わる） */
 async function upload(
   user: ReturnType<typeof getDevUser>,
-  input: { title: string; description?: string },
+  input: { title: string; description?: string; tags?: string[] },
   content: string,
 ) {
   const { report, upload } = await ctx.service.create(user, { ...input, kind: "html" });
@@ -65,7 +65,7 @@ async function upload(
 /** upload + オーナーによる publish まで通す */
 async function uploadPublished(
   user: ReturnType<typeof getDevUser>,
-  input: { title: string; description?: string },
+  input: { title: string; description?: string; tags?: string[] },
   content: string,
 ) {
   const { report } = await upload(user, input, content);
@@ -99,7 +99,7 @@ describe("report lifecycle", () => {
     expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).not.toBeNull();
     expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
     await expectDomainError(ctx.service.get(report.id), "not_found");
-    expect(await ctx.service.search("移転計画")).toHaveLength(0);
+    expect((await ctx.service.search("移転計画")).results).toHaveLength(0);
 
     // owner & admin can still read the meta and the source
     expect((await ctx.service.get(report.id, alice)).report.status).toBe("private");
@@ -117,7 +117,7 @@ describe("report lifecycle", () => {
     const extracted = await ctx.storage.getContentObject(`reports/${report.id}/.extracted.txt`);
     expect(dec.decode(extracted!)).toContain("品川");
 
-    const hits = await ctx.service.search("移転計画");
+    const { results: hits } = await ctx.service.search("移転計画");
     expect(hits.length).toBe(1);
     expect(hits[0]!.report.id).toBe(report.id);
     expect("ownerSub" in hits[0]!.report).toBe(false);
@@ -135,7 +135,7 @@ describe("report lifecycle", () => {
     expect(back.status).toBe("private");
     // hidden from public list/search/content, but source retained
     await expectDomainError(ctx.service.get(report.id), "not_found");
-    expect(await ctx.service.search("四半期")).toHaveLength(0);
+    expect((await ctx.service.search("四半期")).results).toHaveLength(0);
     expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
     expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).not.toBeNull();
     // owner still sees it
@@ -145,7 +145,7 @@ describe("report lifecycle", () => {
     // republish from the retained source
     const again = await ctx.service.publish(alice, report.id);
     expect(again.report.status).toBe("published");
-    expect(await ctx.service.search("四半期")).toHaveLength(1);
+    expect((await ctx.service.search("四半期")).results).toHaveLength(1);
 
     // both operations are idempotent
     expect((await ctx.service.publish(alice, report.id)).report.status).toBe("published");
@@ -171,8 +171,8 @@ describe("report lifecycle", () => {
     expect(second.report.status).toBe("published"); // 公開中の上書きは公開のまま
     expect(second.url).toBeDefined();
 
-    expect(await ctx.service.search("品川")).toHaveLength(0);
-    const osaka = await ctx.service.search("大阪支社");
+    expect((await ctx.service.search("品川")).results).toHaveLength(0);
+    const { results: osaka } = await ctx.service.search("大阪支社");
     expect(osaka).toHaveLength(1);
 
     // overwrite of a private report stays private
@@ -188,7 +188,7 @@ describe("report lifecycle", () => {
   test("delete removes meta, index, content and source", async () => {
     const { report } = await uploadPublished(alice, { title: "削除対象" }, html("d", "抹消される本文"));
     await ctx.service.delete(alice, report.id);
-    expect(await ctx.service.search("抹消")).toHaveLength(0);
+    expect((await ctx.service.search("抹消")).results).toHaveLength(0);
     expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
     expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).toBeNull();
     await expectDomainError(ctx.service.get(report.id), "not_found");
@@ -203,7 +203,7 @@ describe("report lifecycle", () => {
     expect(deleted).toBe(2);
     expect((await ctx.service.listMine(alice)).items).toHaveLength(0);
     await expectDomainError(ctx.service.get(priv.id, admin), "not_found");
-    expect(await ctx.service.search("アリス")).toHaveLength(0);
+    expect((await ctx.service.search("アリス")).results).toHaveLength(0);
     expect((await ctx.service.get(kept.id)).report.id).toBe(kept.id);
 
     await expectDomainError(ctx.service.adminDeleteByOwner(alice, bob.sub), "forbidden");
@@ -235,6 +235,90 @@ describe("report lifecycle", () => {
   });
 });
 
+describe("unlisted (リンク限定共有)", () => {
+  test("publish visibility=unlisted: anyone can get it, but never listed or searchable", async () => {
+    const { report } = await upload(
+      alice,
+      { title: "限定共有レポート" },
+      html("限定", "<p>リンク限定の本文。</p>"),
+    );
+    const res = await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+    expect(res.report.status).toBe("unlisted");
+    expect(res.url).toBe(`http://localhost:3000/r/${report.id}/`);
+
+    // URL を知っていれば匿名でも閲覧できる（content URL 付き）
+    const anon = await ctx.service.get(report.id);
+    expect(anon.report.status).toBe("unlisted");
+    expect(anon.url).toBe(`http://localhost:3000/r/${report.id}/`);
+    expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).not.toBeNull();
+
+    // 一覧・検索には絶対に載らない
+    expect((await ctx.service.listPublished()).items).toHaveLength(0);
+    expect((await ctx.service.search("限定共有レポート")).results).toHaveLength(0);
+  });
+
+  test("published⇔unlisted の切替で検索インデックスが正しく遷移する", async () => {
+    const { report } = await uploadPublished(
+      alice,
+      { title: "切替レポート" },
+      html("s", "<p>切替の本文。</p>"),
+    );
+    expect((await ctx.service.search("切替")).results).toHaveLength(1);
+
+    // published → unlisted: 一覧・検索から消えるが配信は継続
+    const un = await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+    expect(un.report.status).toBe("unlisted");
+    expect((await ctx.service.search("切替")).results).toHaveLength(0);
+    expect((await ctx.service.listPublished()).items).toHaveLength(0);
+    expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).not.toBeNull();
+
+    // unlisted → published（visibility 省略 = published: 後方互換）
+    const re = await ctx.service.publish(alice, report.id);
+    expect(re.report.status).toBe("published");
+    expect((await ctx.service.search("切替")).results).toHaveLength(1);
+    expect((await ctx.service.listPublished()).items).toHaveLength(1);
+
+    // 同一 visibility の再呼び出しは冪等
+    const again = await ctx.service.publish(alice, report.id, { visibility: "published" });
+    expect(again.report.status).toBe("published");
+  });
+
+  test("unlisted の上書きは unlisted のまま、インデックスにも載らない", async () => {
+    const { report } = await upload(alice, { title: "限定上書き" }, html("v1", "<p>初版。</p>"));
+    await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+
+    const { upload: up2 } = await ctx.service.issueUploadUrl(alice, report.id, "html");
+    await ctx.storage.putStagingObject(up2.key, enc.encode(html("v2", "<p>改訂版の本文。</p>")));
+    const second = await ctx.service.complete(alice, report.id, up2.key);
+    expect(second.report.status).toBe("unlisted");
+    expect(second.url).toBeDefined();
+    expect((await ctx.service.search("改訂版")).results).toHaveLength(0);
+    expect((await ctx.service.listPublished()).items).toHaveLength(0);
+  });
+
+  test("unpublish で private に戻る（匿名は不可視に）", async () => {
+    const { report } = await upload(alice, { title: "限定解除" }, html("u", "<p>本文。</p>"));
+    await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+
+    const back = await ctx.service.unpublish(alice, report.id);
+    expect(back.status).toBe("private");
+    await expectDomainError(ctx.service.get(report.id), "not_found");
+    expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
+  });
+
+  test("unlisted でも通報でき、テイクダウンも適用できる", async () => {
+    const { report } = await upload(alice, { title: "限定通報" }, html("f", "<p>本文。</p>"));
+    await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+
+    await ctx.service.flag(report.id, "リンク限定でも閲覧できるため通報");
+    expect(await ctx.service.adminListFlags(admin, report.id)).toHaveLength(1);
+
+    const down = await ctx.service.adminTakedown(admin, report.id);
+    expect(down.status).toBe("takedown");
+    expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
+  });
+});
+
 describe("direct HTML edit", () => {
   test("editContent re-scans, bumps version and updates published content in place", async () => {
     const { report } = await uploadPublished(alice, { title: "編集対象" }, html("v1", "初版の本文"));
@@ -246,8 +330,8 @@ describe("direct HTML edit", () => {
     expect(edited.report.version).toBe(2);
     expect(edited.report.status).toBe("published");
     expect(edited.url).toBeDefined();
-    expect(await ctx.service.search("初版")).toHaveLength(0);
-    expect(await ctx.service.search("編集後")).toHaveLength(1);
+    expect((await ctx.service.search("初版")).results).toHaveLength(0);
+    expect((await ctx.service.search("編集後")).results).toHaveLength(1);
     const content = await ctx.storage.getContentObject(`reports/${report.id}/index.html`);
     expect(dec.decode(content!)).toContain("編集後のユニーク本文トークン");
   });
@@ -298,6 +382,53 @@ describe("daily upload quota", () => {
     expect(ok.report.status).toBe("private");
   });
 
+  test("getUploadQuota reflects usage and resets at the same UTC date boundary as increments", async () => {
+    // 可変クロックで日付境界を跨ぐ（increment と読み取りが同じ dateKey を使うこと）
+    let now = new Date("2026-07-12T23:50:00Z");
+    const limited = createLocalContext({
+      dataDir,
+      scanner: markerScanner,
+      dailyUploadLimit: 2,
+      now: () => now,
+    });
+    expect(await limited.service.getUploadQuota(alice)).toEqual({
+      dailyUploadLimit: 2,
+      usedToday: 0,
+      remaining: 2,
+    });
+
+    await limited.service.create(alice, { title: "1本目", kind: "html" });
+    expect(await limited.service.getUploadQuota(alice)).toEqual({
+      dailyUploadLimit: 2,
+      usedToday: 1,
+      remaining: 1,
+    });
+
+    // 上限到達 + 超過試行後も remaining は負にならない
+    await limited.service.create(alice, { title: "2本目", kind: "html" });
+    await expectDomainError(
+      limited.service.create(alice, { title: "3本目", kind: "html" }),
+      "rate_limited",
+    );
+    expect(await limited.service.getUploadQuota(alice)).toEqual({
+      dailyUploadLimit: 2,
+      usedToday: 2,
+      remaining: 0,
+    });
+    // 他ユーザーは独立
+    expect((await limited.service.getUploadQuota(bob)).remaining).toBe(2);
+
+    // UTC 日付が変わると残数が戻り、再びアップロードできる
+    now = new Date("2026-07-13T00:10:00Z");
+    expect(await limited.service.getUploadQuota(alice)).toEqual({
+      dailyUploadLimit: 2,
+      usedToday: 0,
+      remaining: 2,
+    });
+    const ok = await limited.service.create(alice, { title: "翌日の1本目", kind: "html" });
+    expect(ok.report.status).toBe("private");
+  });
+
   test("overwrite upload-url issuance and editContent also consume quota", async () => {
     const limited = createLocalContext({ dataDir, scanner: markerScanner, dailyUploadLimit: 2 });
     const { report, upload: up } = await limited.service.create(alice, { title: "上書き対象", kind: "html" });
@@ -309,6 +440,61 @@ describe("daily upload quota", () => {
       limited.service.editContent(alice, report.id, html("t", "c")),
       "rate_limited",
     );
+  });
+});
+
+describe("view counts (閲覧数)", () => {
+  test("published get by others / anonymous increments; owner reads do not", async () => {
+    const { report } = await uploadPublished(alice, { title: "閲覧対象" }, html("v", "本文"));
+
+    await ctx.service.get(report.id); // anonymous
+    await ctx.service.get(report.id, bob); // other user
+    // owner の閲覧はカウントしない（自分の確認で数字が膨らまない）
+    const owner = await ctx.service.get(report.id, alice);
+    expect(owner.viewCount).toBe(2);
+    expect(await ctx.repo.getViewCount(report.id)).toBe(2);
+  });
+
+  test("viewCount is returned to owner and admin only", async () => {
+    const { report } = await uploadPublished(alice, { title: "閲覧数の可視性" }, html("v", "本文"));
+    await ctx.service.get(report.id, bob);
+
+    expect((await ctx.service.get(report.id, alice)).viewCount).toBe(1);
+    // admin のモデレーション閲覧はカウントされない（値は見える）
+    expect((await ctx.service.get(report.id, admin)).viewCount).toBe(1);
+    expect((await ctx.service.get(report.id, bob)).viewCount).toBeUndefined();
+    expect((await ctx.service.get(report.id)).viewCount).toBeUndefined();
+  });
+
+  test("private reads do not increment (owner/admin preview is not a view)", async () => {
+    const { report } = await upload(alice, { title: "非公開閲覧" }, html("v", "本文"));
+    await ctx.service.get(report.id, alice);
+    await ctx.service.get(report.id, admin);
+    expect(await ctx.repo.getViewCount(report.id)).toBe(0);
+    // admin にはカウンタ値（0）は返る
+    expect((await ctx.service.get(report.id, admin)).viewCount).toBe(0);
+  });
+
+  test("unlisted views count too; delete purges the counter", async () => {
+    const { report } = await upload(alice, { title: "限定共有の閲覧" }, html("v", "本文"));
+    await ctx.service.publish(alice, report.id, { visibility: "unlisted" });
+    await ctx.service.get(report.id, bob);
+    expect(await ctx.repo.getViewCount(report.id)).toBe(1);
+
+    await ctx.service.delete(alice, report.id);
+    expect(await ctx.repo.getViewCount(report.id)).toBe(0);
+  });
+
+  test("listMine attaches the accumulated viewCount to each report", async () => {
+    const { report: seen } = await uploadPublished(alice, { title: "見られた" }, html("a", "本文A"));
+    await upload(alice, { title: "まだ" }, html("b", "本文B"));
+    await ctx.service.get(seen.id, bob);
+    await ctx.service.get(seen.id);
+
+    const page = await ctx.service.listMine(alice);
+    const counts = new Map(page.items.map((m) => [m.title, m.viewCount]));
+    expect(counts.get("見られた")).toBe(2);
+    expect(counts.get("まだ")).toBe(0);
   });
 });
 
@@ -330,7 +516,7 @@ describe("verdict branching", () => {
     const published = await ctx.service.publish(alice, report.id);
     expect(published.report.status).toBe("published");
     expect(published.report.verdict).toBe("warn"); // scan outcome preserved for audit
-    expect(await ctx.service.search("要注意")).toHaveLength(1);
+    expect((await ctx.service.search("要注意")).results).toHaveLength(1);
   });
 
   test("block → rejected, sample retained in staging, nothing published", async () => {
@@ -350,7 +536,7 @@ describe("verdict branching", () => {
     // nothing in the content store, no source, no index entries
     expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
     expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).toBeNull();
-    expect(await ctx.service.search("悪性")).toHaveLength(0);
+    expect((await ctx.service.search("悪性")).results).toHaveLength(0);
     // staged sample retained for forensics
     expect(await ctx.storage.getStagingObject(up.key)).not.toBeNull();
   });
@@ -365,7 +551,7 @@ describe("verdict branching", () => {
 
     expect(second.report.status).toBe("rejected");
     expect(await ctx.storage.getContentObject(`reports/${report.id}/index.html`)).toBeNull();
-    expect(await ctx.service.search("安全")).toHaveLength(0);
+    expect((await ctx.service.search("安全")).results).toHaveLength(0);
     await expectDomainError(ctx.service.get(report.id), "not_found");
   });
 });
@@ -405,11 +591,84 @@ describe("metadata update & reindex", () => {
     const { report } = await uploadPublished(alice, { title: "旧タイトル" }, html("t", "共通本文キーワード"));
     await ctx.service.update(alice, report.id, { title: "新章突入" });
 
-    expect(await ctx.service.search("旧タイトル")).toHaveLength(0);
-    const hits = await ctx.service.search("新章突入");
+    expect((await ctx.service.search("旧タイトル")).results).toHaveLength(0);
+    const { results: hits } = await ctx.service.search("新章突入");
     expect(hits).toHaveLength(1);
     // body tokens survive a metadata-only update
-    expect(await ctx.service.search("共通本文キーワード")).toHaveLength(1);
+    expect((await ctx.service.search("共通本文キーワード")).results).toHaveLength(1);
+  });
+});
+
+describe("tags", () => {
+  test("create persists normalized tags; they are searchable with weight 6 once published", async () => {
+    const { report } = await uploadPublished(
+      alice,
+      { title: "タグ付きレポート", tags: [" kpi ", "kpi", "", "売上分析"] },
+      html("t", "<p>本文には無い語で探す。</p>"),
+    );
+    expect(report.tags).toEqual(["kpi", "売上分析"]);
+
+    // タグにしか無い語でヒットし、score はタグの重み 6
+    const { results } = await ctx.service.search("kpi");
+    expect(results).toHaveLength(1);
+    expect(results[0]!.report.id).toBe(report.id);
+    expect(results[0]!.score).toBe(6);
+    expect(results[0]!.report.tags).toEqual(["kpi", "売上分析"]);
+  });
+
+  test("title match (8) outranks tag match (6)", async () => {
+    const inTitle = await uploadPublished(alice, { title: "kpi ダッシュボード" }, html("a", "本文A"));
+    const inTag = await uploadPublished(bob, { title: "別件", tags: ["kpi"] }, html("b", "本文B"));
+
+    const { results } = await ctx.service.search("kpi");
+    expect(results.map((r) => r.report.id)).toEqual([inTitle.report.id, inTag.report.id]);
+    expect(results[0]!.score).toBeGreaterThan(results[1]!.score);
+  });
+
+  test("update replaces tags and reindexes: old tag stops matching, new tag hits", async () => {
+    // 語彙が重ならないタグを使う（CJK バイグラムの部分一致を避ける）
+    const { report } = await uploadPublished(
+      alice,
+      { title: "タグ更新対象", tags: ["りんご"] },
+      html("t", "本文"),
+    );
+    expect((await ctx.service.search("りんご")).results).toHaveLength(1);
+
+    const updated = await ctx.service.update(alice, report.id, { tags: ["みかん"] });
+    expect(updated.tags).toEqual(["みかん"]);
+    expect((await ctx.service.search("りんご")).results).toHaveLength(0);
+    expect((await ctx.service.search("みかん")).results).toHaveLength(1);
+
+    // [] で全削除もできる（タイトルでのヒットは残る）
+    await ctx.service.update(alice, report.id, { tags: [] });
+    expect((await ctx.service.search("みかん")).results).toHaveLength(0);
+    expect((await ctx.service.search("タグ更新対象")).results).toHaveLength(1);
+  });
+
+  test("listPublished filters by a single exact tag", async () => {
+    const { report: a } = await uploadPublished(alice, { title: "A", tags: ["月次", "営業"] }, html("a", "x"));
+    await uploadPublished(alice, { title: "B", tags: ["週次"] }, html("b", "y"));
+    await uploadPublished(bob, { title: "C" }, html("c", "z"));
+
+    const filtered = await ctx.service.listPublished({ tag: "月次" });
+    expect(filtered.items.map((m) => m.id)).toEqual([a.id]);
+    // 部分一致では絞り込まれない（完全一致のみ）
+    expect((await ctx.service.listPublished({ tag: "月" })).items).toHaveLength(0);
+    expect((await ctx.service.listPublished()).items).toHaveLength(3);
+  });
+
+  test("invalid tags are rejected at create/update", async () => {
+    await expectDomainError(
+      ctx.service.create(alice, { title: "t", kind: "html", tags: ["x".repeat(31)] }),
+      "validation_failed",
+    );
+    const { report } = await upload(alice, { title: "上限" }, html("t", "b"));
+    await expectDomainError(
+      ctx.service.update(alice, report.id, {
+        tags: Array.from({ length: 11 }, (_, i) => `t${i}`),
+      }),
+      "validation_failed",
+    );
   });
 });
 
@@ -420,15 +679,53 @@ describe("search ranking", () => {
     expect(a.report.status).toBe("published");
     expect(b.report.status).toBe("published");
 
-    const hits = await ctx.service.search("監査ログ");
+    const { results: hits } = await ctx.service.search("監査ログ");
     expect(hits.map((h) => h.report.id)).toEqual([a.report.id, b.report.id]);
     expect(hits[0]!.score).toBeGreaterThan(hits[1]!.score);
 
     // "設計" only exists in A's title → full match ranks A first for combined query
-    const combined = await ctx.service.search("監査ログ 設計");
+    const { results: combined } = await ctx.service.search("監査ログ 設計");
     expect(combined[0]!.report.id).toBe(a.report.id);
     expect(combined[0]!.matchedAll).toBe(true);
     expect(combined[1]!.matchedAll).toBe(false);
+  });
+});
+
+describe("search pagination", () => {
+  test("offset cursor pages through the full ranking without overlap", async () => {
+    // updatedAt の同着で並びが揺れないよう、1秒ずつ進む固定クロックを使う
+    let tick = 0;
+    ctx = createLocalContext({
+      dataDir,
+      scanner: markerScanner,
+      now: () => new Date(Date.UTC(2026, 6, 12, 0, 0, tick++)),
+    });
+    const ids: string[] = [];
+    for (const title of ["共通語その一", "共通語その二", "共通語その三"]) {
+      const { report } = await uploadPublished(alice, { title }, html(title, "本文"));
+      ids.push(report.id);
+    }
+
+    const first = await ctx.service.search("共通語", { limit: 2 });
+    expect(first.results).toHaveLength(2);
+    expect(first.nextCursor).toBeDefined();
+
+    const second = await ctx.service.search("共通語", { limit: 2, cursor: first.nextCursor! });
+    expect(second.results).toHaveLength(1);
+    expect(second.nextCursor).toBeUndefined();
+
+    // ページをまたいで重複せず全件をカバーする
+    const seen = [...first.results, ...second.results].map((r) => r.report.id);
+    expect(new Set(seen).size).toBe(3);
+    expect([...seen].sort()).toEqual([...ids].sort());
+  });
+
+  test("invalid cursor → bad_request; no cursor on the final page", async () => {
+    await uploadPublished(alice, { title: "単独ヒット" }, html("t", "本文"));
+    await expectDomainError(ctx.service.search("単独ヒット", { cursor: "abc" }), "bad_request");
+    const page = await ctx.service.search("単独ヒット", { limit: 20 });
+    expect(page.results).toHaveLength(1);
+    expect(page.nextCursor).toBeUndefined();
   });
 });
 
@@ -445,21 +742,204 @@ describe("flags (通報)", () => {
 
     // 通報一覧（管理画面のキュー）
     const flagged = await ctx.service.adminListFlagged(admin);
-    expect(flagged).toHaveLength(1);
-    expect(flagged[0]!.report.id).toBe(report.id);
-    expect(flagged[0]!.flags).toHaveLength(2);
+    expect(flagged.items).toHaveLength(1);
+    expect(flagged.items[0]!.report.id).toBe(report.id);
+    expect(flagged.items[0]!.flags).toHaveLength(2);
+    expect(flagged.nextCursor).toBeUndefined();
     await expectDomainError(ctx.service.adminListFlagged(alice), "forbidden");
 
     // 解決すると一覧から消える
     await ctx.service.adminClearFlags(admin, report.id);
-    expect(await ctx.service.adminListFlagged(admin)).toHaveLength(0);
+    expect((await ctx.service.adminListFlagged(admin)).items).toHaveLength(0);
     expect(await ctx.service.adminListFlags(admin, report.id)).toHaveLength(0);
     await expectDomainError(ctx.service.adminClearFlags(alice, report.id), "forbidden");
+  });
+
+  test("adminListFlagged paginates with a cursor (newest flag first)", async () => {
+    // 通報時刻の同着で並びが揺れないよう、1秒ずつ進む固定クロックを使う
+    let tick = 0;
+    ctx = createLocalContext({
+      dataDir,
+      scanner: markerScanner,
+      now: () => new Date(Date.UTC(2026, 6, 12, 0, 0, tick++)),
+    });
+    const { report: older } = await uploadPublished(alice, { title: "先に通報" }, html("a", "b"));
+    const { report: newer } = await uploadPublished(alice, { title: "後に通報" }, html("a", "b"));
+    await ctx.service.flag(older.id, "古い通報");
+    await ctx.service.flag(newer.id, "新しい通報");
+
+    const first = await ctx.service.adminListFlagged(admin, { limit: 1 });
+    expect(first.items.map((i) => i.report.id)).toEqual([newer.id]);
+    expect(first.nextCursor).toBeDefined();
+
+    const second = await ctx.service.adminListFlagged(admin, {
+      limit: 1,
+      cursor: first.nextCursor!,
+    });
+    expect(second.items.map((i) => i.report.id)).toEqual([older.id]);
+    expect(second.nextCursor).toBeUndefined();
+
+    await expectDomainError(
+      ctx.service.adminListFlagged(admin, { cursor: "not-a-number" }),
+      "bad_request",
+    );
   });
 
   test("unpublished reports cannot be flagged", async () => {
     const { report } = await upload(alice, { title: "非公開通報不可" }, html("a", "b"));
     await expectDomainError(ctx.service.flag(report.id, "spam"), "not_found");
+  });
+});
+
+describe("version history & rollback", () => {
+  test("ingest keeps every version's original bytes and grows the history", async () => {
+    const { report } = await upload(alice, { title: "履歴対象" }, html("v1", "初版本文"));
+    expect(report.versions).toHaveLength(1);
+    expect(report.versions[0]).toMatchObject({ version: 1, kind: "html", verdict: "pass" });
+
+    const edited = await ctx.service.editContent(alice, report.id, html("v2", "二版本文"));
+    expect(edited.report.version).toBe(2);
+    expect(edited.report.versions.map((v) => v.version)).toEqual([1, 2]);
+
+    // 原本が current と v<version> の両方に残る
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).not.toBeNull();
+    const v1 = await ctx.storage.getContentObject(`sources/${report.id}/v1`);
+    const v2 = await ctx.storage.getContentObject(`sources/${report.id}/v2`);
+    expect(dec.decode(v1!)).toContain("初版本文");
+    expect(dec.decode(v2!)).toContain("二版本文");
+
+    // listVersions は新しい順
+    const listed = await ctx.service.listVersions(alice, report.id);
+    expect(listed.map((v) => v.version)).toEqual([2, 1]);
+    expect(listed[0]!.sizeBytes).toBe(edited.report.sizeBytes!);
+  });
+
+  test("rollback re-ingests the old bytes as a new version with a fresh scan", async () => {
+    // 検索の入れ替わりを見るため、両版で語彙が重ならない本文にする（CJK バイグラム対策）
+    const { report } = await uploadPublished(alice, { title: "戻す対象" }, html("v1", "りんごケーキ"));
+    await ctx.service.editContent(alice, report.id, html("v2", "自動車整備"));
+
+    const rolled = await ctx.service.rollback(alice, report.id, 1);
+    expect(rolled.report.version).toBe(3);
+    expect(rolled.report.status).toBe("published"); // 公開中のまま差し替わる
+    expect(rolled.url).toBeDefined();
+    expect(rolled.report.versions.map((v) => v.version)).toEqual([1, 2, 3]);
+
+    // 内容・検索インデックスとも v1 相当に戻る
+    expect((await ctx.service.getSource(alice, report.id)).html).toContain("りんごケーキ");
+    expect((await ctx.service.search("りんご")).results).toHaveLength(1);
+    expect((await ctx.service.search("自動車")).results).toHaveLength(0);
+
+    // 旧版の verdict が warn なら rollback 後も warn として再スキャンされる
+    await ctx.service.editContent(alice, report.id, html("warn", "WARN_ME 注意本文"));
+    const back = await ctx.service.rollback(alice, report.id, 4);
+    expect(back.report.verdict).toBe("warn");
+    expect(back.report.findings[0]?.ruleId).toBe("test.warn");
+  });
+
+  test("rollback re-runs the scan: content that now blocks lands rejected and purges", async () => {
+    // 判定を後から差し替えられるスキャナで「当時 pass、今は block」を再現する
+    let blockAll = false;
+    const flip = createLocalContext({
+      dataDir,
+      scanner: {
+        async scan() {
+          return blockAll
+            ? {
+                verdict: "block" as const,
+                findings: [{ ruleId: "test.block", severity: "block" as const, message: "now blocked" }],
+              }
+            : { verdict: "pass" as const, findings: [] };
+        },
+      },
+    });
+    const { report, upload: up } = await flip.service.create(alice, { title: "後日block", kind: "html" });
+    await flip.storage.putStagingObject(up.key, enc.encode(html("v1", "本文")));
+    await flip.service.complete(alice, report.id, up.key);
+    await flip.service.editContent(alice, report.id, html("v2", "本文2"));
+
+    blockAll = true;
+    const rolled = await flip.service.rollback(alice, report.id, 1);
+    expect(rolled.report.status).toBe("rejected");
+    expect(rolled.report.verdict).toBe("block");
+    // sources/ ごと消えるため履歴も空になる
+    expect(rolled.report.versions).toEqual([]);
+    expect(await flip.storage.getContentObject(`sources/${report.id}/v1`)).toBeNull();
+    expect(await flip.storage.getContentObject(`sources/${report.id}/current`)).toBeNull();
+  });
+
+  test("zip 版も原本ごと rollback できる（kind は取り込み時点の値で復元）", async () => {
+    const zipCtx = createLocalContext({
+      dataDir,
+      scanner: markerScanner,
+      zipExtractor: {
+        async extract(data) {
+          return [{ path: "index.html", data }];
+        },
+      },
+    });
+    const { report, upload: up } = await zipCtx.service.create(alice, { title: "zip履歴", kind: "zip" });
+    await zipCtx.storage.putStagingObject(up.key, enc.encode(html("z1", "zip初版")));
+    await zipCtx.service.complete(alice, report.id, up.key);
+
+    const { upload: up2 } = await zipCtx.service.issueUploadUrl(alice, report.id, "zip");
+    await zipCtx.storage.putStagingObject(up2.key, enc.encode(html("z2", "zip二版")));
+    await zipCtx.service.complete(alice, report.id, up2.key);
+
+    const rolled = await zipCtx.service.rollback(alice, report.id, 1);
+    expect(rolled.report.version).toBe(3);
+    expect(rolled.report.kind).toBe("zip");
+    expect(rolled.report.versions.map((v) => v.version)).toEqual([1, 2, 3]);
+    expect((await zipCtx.service.getVersionSource(alice, report.id, 3)).html).toContain("zip初版");
+  });
+
+  test("history is capped: the oldest version objects are trimmed beyond the limit", async () => {
+    // 上限を意識した回数（22回）取り込み、古い2版がメタ・オブジェクト双方から消えること
+    const { report } = await upload(alice, { title: "上限テスト" }, html("v1", "本文1"));
+    for (let i = 2; i <= 22; i++) {
+      await ctx.service.editContent(alice, report.id, html(`v${i}`, `本文${i}`));
+    }
+    const listed = await ctx.service.listVersions(alice, report.id);
+    expect(listed).toHaveLength(20);
+    expect(listed[0]!.version).toBe(22);
+    expect(listed[listed.length - 1]!.version).toBe(3);
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v1`)).toBeNull();
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v2`)).toBeNull();
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v3`)).not.toBeNull();
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v22`)).not.toBeNull();
+    // 間引かれた版へは rollback できない
+    await expectDomainError(ctx.service.rollback(alice, report.id, 1), "not_found");
+  });
+
+  test("purge (delete) removes every version object", async () => {
+    const { report } = await upload(alice, { title: "全削除" }, html("v1", "本文"));
+    await ctx.service.editContent(alice, report.id, html("v2", "本文2"));
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v2`)).not.toBeNull();
+
+    await ctx.service.delete(alice, report.id);
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v1`)).toBeNull();
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/v2`)).toBeNull();
+    expect(await ctx.storage.getContentObject(`sources/${report.id}/current`)).toBeNull();
+  });
+
+  test("authorization: versions APIs are owner/admin only; unknown versions → not_found", async () => {
+    const { report } = await upload(alice, { title: "履歴の権限" }, html("v1", "本文"));
+
+    await expectDomainError(ctx.service.listVersions(bob, report.id), "forbidden");
+    await expectDomainError(ctx.service.getVersionSource(bob, report.id, 1), "forbidden");
+    await expectDomainError(ctx.service.rollback(bob, report.id, 1), "forbidden");
+
+    // admin は閲覧・復元とも可能
+    expect(await ctx.service.listVersions(admin, report.id)).toHaveLength(1);
+    expect((await ctx.service.getVersionSource(admin, report.id, 1)).html).toContain("本文");
+
+    await expectDomainError(ctx.service.getVersionSource(alice, report.id, 99), "not_found");
+    await expectDomainError(ctx.service.rollback(alice, report.id, 99), "not_found");
+
+    // rollback もクォータを消費する（同じ dataDir を上限1で読み直して検証）
+    const { report: q } = await upload(alice, { title: "クォータ" }, html("q1", "本文"));
+    const limited = createLocalContext({ dataDir, scanner: markerScanner, dailyUploadLimit: 1 });
+    await expectDomainError(limited.service.rollback(alice, q.id, 1), "rate_limited");
   });
 });
 
@@ -470,7 +950,7 @@ describe("persistence", () => {
     const restarted = createLocalContext({ dataDir, scanner: markerScanner });
     const got = await restarted.service.get(report.id);
     expect(got.report.title).toBe("永続化テスト");
-    const hits = await restarted.service.search("再起動");
+    const { results: hits } = await restarted.service.search("再起動");
     expect(hits).toHaveLength(1);
   });
 });
@@ -517,5 +997,110 @@ describe("legacy source recovery (sources/ 導入前のデータ)", () => {
     const edited = await ctx.service.editContent(alice, report.id, html("書き直し", "新本文"));
     expect(edited.report.status).toBe("published");
     expect((await ctx.service.getSource(alice, report.id)).html).toContain("新本文");
+  });
+});
+
+describe("有効期限つき公開 (expiresAt — 遅延失効)", () => {
+  let clock: Date;
+  let timed: LocalContext;
+
+  beforeEach(() => {
+    clock = new Date("2026-07-12T00:00:00.000Z");
+    timed = createLocalContext({ dataDir, scanner: markerScanner, now: () => clock });
+  });
+
+  const in1h = () => new Date(clock.getTime() + 60 * 60 * 1000).toISOString();
+  const advance2h = () => {
+    clock = new Date(clock.getTime() + 2 * 60 * 60 * 1000);
+  };
+
+  /** create → staged PUT → complete（クロック注入コンテキスト版） */
+  async function uploadTimed(title: string, body: string): Promise<string> {
+    const { report, upload: up } = await timed.service.create(alice, { title, kind: "html" });
+    await timed.storage.putStagingObject(up.key, enc.encode(html(title, body)));
+    await timed.service.complete(alice, report.id, up.key);
+    return report.id;
+  }
+
+  test("期限前は一覧・検索・get に見え、期限後は非オーナーから消える（オーナー/admin はメタ閲覧可）", async () => {
+    const id = await uploadTimed("期限つき", "四半期の限定共有資料");
+    const expiresAt = in1h();
+    const pub = await timed.service.publish(alice, id, { expiresAt });
+    expect(pub.report.expiresAt).toBe(expiresAt);
+
+    // 期限前: 誰でも見える
+    expect((await timed.service.listPublished()).items.map((m) => m.id)).toContain(id);
+    expect((await timed.service.search("限定共有")).results).toHaveLength(1);
+    expect((await timed.service.get(id, bob)).url).toBeDefined();
+
+    // 期限後: 一覧・検索・get(非オーナー) から消える（status は書き換えない）
+    advance2h();
+    expect((await timed.service.listPublished()).items.map((m) => m.id)).not.toContain(id);
+    expect((await timed.service.search("限定共有")).results).toHaveLength(0);
+    await expectDomainError(timed.service.get(id), "not_found");
+    await expectDomainError(timed.service.get(id, bob), "not_found");
+
+    // オーナー/admin はメタを閲覧でき、過去の expiresAt で期限切れが分かる（url なし = 非公開扱い）
+    const mine = await timed.service.get(id, alice);
+    expect(mine.report.status).toBe("published");
+    expect(mine.report.expiresAt).toBe(expiresAt);
+    expect(mine.url).toBeUndefined();
+    expect((await timed.service.get(id, admin)).url).toBeUndefined();
+  });
+
+  test("失効後の再 publish で復活（期限の再設定も、省略による無期限クリアも可）", async () => {
+    const id = await uploadTimed("再公開", "失効と復活の本文");
+    await timed.service.publish(alice, id, { expiresAt: in1h() });
+    advance2h();
+    await expectDomainError(timed.service.get(id, bob), "not_found");
+
+    // 新しい期限で再 publish → 見える
+    const renewed = await timed.service.publish(alice, id, { expiresAt: in1h() });
+    expect(renewed.report.expiresAt).toBe(in1h());
+    expect((await timed.service.get(id, bob)).url).toBeDefined();
+    expect((await timed.service.search("失効と復活")).results).toHaveLength(1);
+
+    // expiresAt 省略の再 publish は無期限にクリア
+    advance2h();
+    const forever = await timed.service.publish(alice, id);
+    expect(forever.report.expiresAt).toBeUndefined();
+    advance2h();
+    expect((await timed.service.get(id, bob)).url).toBeDefined();
+  });
+
+  test("過去（および現在ちょうど）の expiresAt は publish / update とも validation_failed", async () => {
+    const id = await uploadTimed("過去日時", "検証用の本文");
+    const past = new Date(clock.getTime() - 1000).toISOString();
+    await expectDomainError(
+      timed.service.publish(alice, id, { expiresAt: past }),
+      "validation_failed",
+    );
+    await expectDomainError(
+      timed.service.publish(alice, id, { expiresAt: clock.toISOString() }),
+      "validation_failed",
+    );
+    await timed.service.publish(alice, id);
+    await expectDomainError(
+      timed.service.update(alice, id, { expiresAt: past }),
+      "validation_failed",
+    );
+  });
+
+  test("update (PATCH) で期限を設定でき、null で無期限に戻せる", async () => {
+    const id = await uploadTimed("PATCH期限", "編集用の本文");
+    await timed.service.publish(alice, id);
+    const expiresAt = in1h();
+    const set = await timed.service.update(alice, id, { expiresAt });
+    expect(set.expiresAt).toBe(expiresAt);
+    const cleared = await timed.service.update(alice, id, { expiresAt: null });
+    expect(cleared.expiresAt).toBeUndefined();
+  });
+
+  test("unpublish は期限もクリアする（再 publish で設定し直す）", async () => {
+    const id = await uploadTimed("非公開で期限クリア", "トグル用の本文");
+    await timed.service.publish(alice, id, { expiresAt: in1h() });
+    const hidden = await timed.service.unpublish(alice, id);
+    expect(hidden.status).toBe("private");
+    expect(hidden.expiresAt).toBeUndefined();
   });
 });
